@@ -1,0 +1,6 @@
+*.efi
+*.elf
+*.bin
+*.lib
+*.o
+/esp/
