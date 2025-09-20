@@ -13,7 +13,7 @@ __attribute__((noinline)) void puts(const char *s)
 
 __attribute__((noreturn)) __attribute__((section(".text.entry"))) void kernel_entry()
 {
-	puts("Starting kernel...");
+	puts("Starting kernel...\n");
 	asm volatile("push %rax; pop %rax");
 	puts("Hello World!\n");
 
