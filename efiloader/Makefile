@@ -11,5 +11,5 @@ risc86.efi: main.o
 
 clean:
 	rm -f *.o risc86.efi
-	
+
 .PHONY: clean
