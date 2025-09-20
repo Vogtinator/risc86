@@ -77,7 +77,7 @@ static EFI_STATUS mmapOne(UINTN phys, UINTN virt, UINTN size, PageTableFlags fla
 	UINTN *pdpte = &pdpt[(virt >> 30) & 0x1FF];
 
 	// 1GiB page?
-	if (!(phys & 0x3FFFFFFF) && !(virt & 0x3FFFFFFF) && !(size & 0x3FFFFFFF)) {
+	if (!(phys & 0x3FFFFFFF) && !(virt & 0x3FFFFFFF) && size >= 1 << 30) {
 		*pdpte = (EFI_PHYSICAL_ADDRESS) phys | PT_HUGEPAGE | flags;
 		return 1 << 30;
 	}
@@ -99,7 +99,7 @@ static EFI_STATUS mmapOne(UINTN phys, UINTN virt, UINTN size, PageTableFlags fla
 	UINTN *pde = &pd[(virt >> 21) & 0x1FF];
 
 	// 2MiB page?
-	if (!(phys & 0x1FFFFF) && !(virt & 0x1FFFFF) && !(size & 0x1FFFFF)) {
+	if (!(phys & 0x1FFFFF) && !(virt & 0x1FFFFF) && size >= 1 << 21) {
 		*pde = (EFI_PHYSICAL_ADDRESS) phys | PT_HUGEPAGE | flags;
 		return 1 << 21;
 	}
