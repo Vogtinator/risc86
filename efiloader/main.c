@@ -5,12 +5,23 @@
 // Internal kernel ABI constants
 static const UINTN KERNEL_STACK_LOW  = 0xFFFF800000000000UL,
                    KERNEL_STACK_SIZE = 12 * 1024 * 1024,     // 12MiB
-                   KERNEL_LOAD_ADDR  = 0xFFFF810000000000UL;
+                   KERNEL_LOAD_ADDR  = 0xFFFF810000000000UL,
+                   KERNEL_PHYS_START = 0xFFFF900000000000UL,
+                   KERNEL_PHYS_END   = 0xFFFFA00000000000UL;
 
 // Embedded raw kernel binary to load
 alignas(PAGE_SIZE) static const UINT8 kernel[] = {
 #embed KERNEL_BIN_PATH
 };
+
+struct KernelParams {
+	uint64_t kernel_phys, kernel_len;
+	uint64_t initrd_phys, initrd_len;
+	struct MemoryAttrib {
+		uint64_t start, size;
+		uint64_t flags;
+	} memory_regions[256];
+} __attribute__ ((packed));
 
 void *memcpy(void *target, void *src, size_t len)
 {
@@ -31,14 +42,22 @@ void *memset(void *ptr, uint8_t val, size_t len)
 
 static EFI_SYSTEM_TABLE *ST = NULL;
 
-static UINTN *allocPageTable()
+static void *allocPages(UINTN count)
 {
 	EFI_PHYSICAL_ADDRESS ptr;
-	// TODO: Correct type?
-	if (ST->BootServices->AllocatePages(AllocateAnyPages, EfiLoaderData, 1, &ptr) != EFI_SUCCESS)
+	// TODO: Correct type? Can't be freed.
+	if (ST->BootServices->AllocatePages(AllocateAnyPages, EfiLoaderData, count, &ptr) != EFI_SUCCESS)
 		return NULL;
 
-	UINTN *ret = (UINTN*) ptr;
+	return (void*) ptr;
+}
+
+static UINTN *allocPageTable()
+{
+	UINTN *ret = allocPages(1);
+	if (!ret)
+		return NULL;
+
 	memset(ret, 0, PAGE_SIZE);
 	return ret;
 }
@@ -150,10 +169,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
 	ST = SystemTable;
 
-	// Greeting.
+	// Sign of life
 	Status = SystemTable->ConOut->OutputString(SystemTable->ConOut, L"Loading kernel...\r\n");
 	if (EFI_ERROR(Status))
 		return Status;
+
+	// Load kernel and initrd
+	// TODO
 
 	// Allocate pml4
 	pml4 = allocPageTable();
@@ -161,32 +183,94 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		return EFI_OUT_OF_RESOURCES;
 
 	// Allocate stack
-	EFI_PHYSICAL_ADDRESS stackPhys;
-	// TODO: Correct type?
-	if (ST->BootServices->AllocatePages(AllocateAnyPages, EfiLoaderData, KERNEL_STACK_SIZE / PAGE_SIZE, &stackPhys) != EFI_SUCCESS)
+	EFI_PHYSICAL_ADDRESS stackPhys = (EFI_PHYSICAL_ADDRESS) allocPages(KERNEL_STACK_SIZE / PAGE_SIZE);
+	if (!stackPhys)
 		return EFI_OUT_OF_RESOURCES;
 
 	// Map stack
-	Status = mmap(stackPhys, KERNEL_STACK_LOW, KERNEL_STACK_SIZE, PT_NOEXEC | PT_WRITABLE | PT_PRESENT);
+	Status = mmap(stackPhys, KERNEL_STACK_LOW, KERNEL_STACK_SIZE, PT_NOEXEC | PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
 	if (EFI_ERROR(Status))
 		return Status;
 
 	// Map kernel
-	Status = mmap((EFI_PHYSICAL_ADDRESS) &kernel, KERNEL_LOAD_ADDR, (sizeof(kernel) + 0xFFF) & ~0xFFFULL, PT_WRITABLE | PT_PRESENT);
+	Status = mmap((EFI_PHYSICAL_ADDRESS) &kernel, KERNEL_LOAD_ADDR, (sizeof(kernel) + 0xFFF) & ~0xFFFULL, PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
 	if (EFI_ERROR(Status))
 		return Status;
 
 	// Get memory map and figure out range for identity map
+	UINTN MemoryMapSize = 0, MapKey = 0, DescriptorSize = 0;
+	UINT32 DescriptorVersion = 0;
 
-	// Perform identity map so that paging can be enabled
-	Status = mmap(0, 0, 1 << 30, PT_WRITABLE | PT_PRESENT);
+	// Get size first
+	Status = ST->BootServices->GetMemoryMap(&MemoryMapSize, NULL, &MapKey, &DescriptorSize, &DescriptorVersion);
+	if (Status != EFI_BUFFER_TOO_SMALL)
+		return Status;
+
+	// Allocate space for the memory map + some slack
+	UINTN MemoryMapAllocSize = MemoryMapSize + 16 * DescriptorSize;
+	EFI_MEMORY_DESCRIPTOR *MemoryMap = NULL;
+	// TODO: Correct type? Can be freed.
+	Status = ST->BootServices->AllocatePool(EfiLoaderData, MemoryMapAllocSize, (void**) &MemoryMap);
 	if (EFI_ERROR(Status))
 		return Status;
 
-	// Exit boot services
-	/*Status = SystemTable->BootServices->ExitBootServices(ImageHandle, 0); // TODO: MapKey?
+	MemoryMapSize = MemoryMapAllocSize;
+	Status = ST->BootServices->GetMemoryMap(&MemoryMapSize, MemoryMap, &MapKey, &DescriptorSize, &DescriptorVersion);
 	if (EFI_ERROR(Status))
-		return Status;*/
+		return Status;
+
+	// Get the end of physical memory
+	UINTN entry_count = MemoryMapSize / DescriptorSize;
+	UINTN phys_addr_max = 0;
+	for(UINTN i = 0; i < entry_count; ++i) {
+		EFI_MEMORY_DESCRIPTOR *map_entry = (EFI_MEMORY_DESCRIPTOR*) ((UINTN)MemoryMap + i * DescriptorSize);
+		UINTN entry_phys_end = map_entry->PhysicalStart + map_entry->NumberOfPages * PAGE_SIZE;
+		if (phys_addr_max < entry_phys_end)
+			phys_addr_max = entry_phys_end;
+	}
+
+	if (KERNEL_PHYS_START + phys_addr_max >= KERNEL_PHYS_END)
+		return EFI_INVALID_PARAMETER;
+
+	// Perform identity map so that paging can be enabled
+	Status = mmap(0, 0, phys_addr_max, PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	// Map physical memory into kernel space
+	Status = mmap(0, KERNEL_PHYS_START, phys_addr_max, PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	struct KernelParams *params = NULL;
+	// TODO: Correct type? Can't be freed.
+	Status = ST->BootServices->AllocatePool(EfiLoaderData, sizeof(struct KernelParams), (void**) &params);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	/* TODO: params->initrd_phys = ... */
+
+	// Get the final memory map
+	MemoryMapSize = MemoryMapAllocSize;
+	Status = ST->BootServices->GetMemoryMap(&MemoryMapSize, MemoryMap, &MapKey, &DescriptorSize, &DescriptorVersion);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	entry_count = MemoryMapSize / DescriptorSize;
+	if (entry_count >= sizeof(params->memory_regions) / sizeof(params->memory_regions[0]))
+		return EFI_OUT_OF_RESOURCES;
+
+	for(UINTN i = 0; i < entry_count; ++i) {
+		EFI_MEMORY_DESCRIPTOR *map_entry = (EFI_MEMORY_DESCRIPTOR*) ((UINTN)MemoryMap + i * DescriptorSize);
+		params->memory_regions[i].start = map_entry->PhysicalStart;
+		params->memory_regions[i].size = map_entry->NumberOfPages * PAGE_SIZE;
+		params->memory_regions[i].flags = 0xcafebeef; // TODO
+	}
+
+	// Exit boot services
+	Status = SystemTable->BootServices->ExitBootServices(ImageHandle, MapKey);
+	if (EFI_ERROR(Status))
+		return Status;
 
 	// Enable paging
 	__asm volatile("mov %[pml4], %%cr3\n" :: [pml4] "r" (pml4));
@@ -194,6 +278,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	// Set up stack and jump to kernel
 	__asm volatile("mov %[stack_high], %%rsp\n"
 	               "jmp *%[kernel]" ::
+	               "D" (params), // First parameter to the kernel
 	               [stack_high] "r" (KERNEL_STACK_LOW + KERNEL_STACK_SIZE),
 				   [kernel] "r" (KERNEL_LOAD_ADDR));
 
