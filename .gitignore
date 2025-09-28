@@ -1,6 +1,1 @@
-*.efi
-*.elf
-*.bin
-*.lib
-*.o
-/esp/
+/build/

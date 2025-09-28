@@ -9,7 +9,7 @@ static const UINTN KERNEL_STACK_LOW  = 0xFFFF800000000000UL,
 
 // Embedded raw kernel binary to load
 alignas(PAGE_SIZE) static const UINT8 kernel[] = {
-#embed "../kernel/kernel.bin"
+#embed KERNEL_BIN_PATH
 };
 
 void *memcpy(void *target, void *src, size_t len)
