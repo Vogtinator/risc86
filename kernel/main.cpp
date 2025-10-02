@@ -1,21 +1,23 @@
-#include <cstdint>
+#include <stdint.h>
+#include <stdio.h>
+#include <unistd.h>
 
-__attribute__((noinline)) void putc(char c)
-{
-	asm volatile("out %[c], %[port]" :: [port] "d" (uint16_t(0xe9)), [c] "a" (uint8_t(c)));
-}
+struct KernelParams {
+	uint64_t kernel_phys, kernel_len;
+	uint64_t initrd_phys, initrd_len;
+	struct MemoryAttrib {
+		uint64_t start, size;
+		uint64_t flags;
+	} memory_regions[256];
+} __attribute__ ((packed));
 
-__attribute__((noinline)) void puts(const char *s)
+__attribute__((noreturn)) __attribute__((section(".text.entry"))) void kernel_entry(KernelParams *params)
 {
-	while(*s)
-		putc(*s++);
-}
+	puts("Starting kernel...");
 
-__attribute__((noreturn)) __attribute__((section(".text.entry"))) void kernel_entry()
-{
-	puts("Starting kernel...\n");
-	asm volatile("push %rax; pop %rax");
-	puts("Hello World!\n");
+	puts("Memory map:");
+	for(int i = 0; i < 42; ++i)
+		printf("Entry %02d %09lx-%09lx %08lx\n", i, params->memory_regions[i].start, params->memory_regions[i].size, params->memory_regions[i].flags);
 
 	for(;;)
 		asm volatile("cli; hlt");
