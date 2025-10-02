@@ -279,7 +279,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	__asm volatile("mov %[stack_high], %%rsp\n"
 	               "jmp *%[kernel]" ::
 	               "D" (params), // First parameter to the kernel
-	               [stack_high] "r" (KERNEL_STACK_LOW + KERNEL_STACK_SIZE),
+	               [stack_high] "r" (KERNEL_STACK_LOW + KERNEL_STACK_SIZE - 8), // -8 for alignment as if it was a call
 				   [kernel] "r" (KERNEL_LOAD_ADDR));
 
 	__builtin_unreachable();
