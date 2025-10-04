@@ -23,6 +23,8 @@ struct KernelParams {
 	} memory_regions[256];
 } __attribute__ ((packed));
 
+static struct KernelParams params = { 0 };
+
 void *memcpy(void *target, void *src, size_t len)
 {
 	uint8_t *target8 = target, *src8 = src;;
@@ -242,14 +244,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	if (EFI_ERROR(Status))
 		return Status;
 
-	struct KernelParams *params = NULL;
-	// TODO: Correct type? Can't be freed.
-	Status = ST->BootServices->AllocatePool(EfiLoaderData, sizeof(struct KernelParams), (void**) &params);
-	if (EFI_ERROR(Status))
-		return Status;
-
-	/* TODO: params->initrd_phys = ... */
-
 	// Get the final memory map
 	MemoryMapSize = MemoryMapAllocSize;
 	Status = ST->BootServices->GetMemoryMap(&MemoryMapSize, MemoryMap, &MapKey, &DescriptorSize, &DescriptorVersion);
@@ -257,14 +251,14 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		return Status;
 
 	entry_count = MemoryMapSize / DescriptorSize;
-	if (entry_count >= sizeof(params->memory_regions) / sizeof(params->memory_regions[0]))
+	if (entry_count >= sizeof(params.memory_regions) / sizeof(params.memory_regions[0]))
 		return EFI_OUT_OF_RESOURCES;
 
 	for(UINTN i = 0; i < entry_count; ++i) {
 		EFI_MEMORY_DESCRIPTOR *map_entry = (EFI_MEMORY_DESCRIPTOR*) ((UINTN)MemoryMap + i * DescriptorSize);
-		params->memory_regions[i].start = map_entry->PhysicalStart;
-		params->memory_regions[i].size = map_entry->NumberOfPages * PAGE_SIZE;
-		params->memory_regions[i].flags = 0xcafebeef; // TODO
+		params.memory_regions[i].start = map_entry->PhysicalStart;
+		params.memory_regions[i].size = map_entry->NumberOfPages * PAGE_SIZE;
+		params.memory_regions[i].flags = 0xcafebeef; // TODO
 	}
 
 	// Exit boot services
@@ -278,7 +272,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	// Set up stack and jump to kernel
 	__asm volatile("mov %[stack_high], %%rsp\n"
 	               "jmp *%[kernel]" ::
-	               "D" (params), // First parameter to the kernel
+	               "D" (&params), // First parameter to the kernel
 	               [stack_high] "r" (KERNEL_STACK_LOW + KERNEL_STACK_SIZE - 8), // -8 for alignment as if it was a call
 				   [kernel] "r" (KERNEL_LOAD_ADDR));
 
