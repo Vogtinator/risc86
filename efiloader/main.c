@@ -165,6 +165,95 @@ static EFI_STATUS mmap(UINTN phys, UINTN virt, UINTN size, PageTableFlags flags)
 	return EFI_SUCCESS;
 }
 
+static EFI_STATUS openVolumeOfImage(EFI_HANDLE ImageHandle, EFI_FILE_HANDLE *Volume)
+{
+	EFI_LOADED_IMAGE *loaded_image = NULL;
+	EFI_GUID lipGuid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
+	EFI_GUID fsGuid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
+
+	EFI_STATUS Status = ST->BootServices->HandleProtocol(ImageHandle, &lipGuid, (void**)&loaded_image);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	EFI_FILE_IO_INTERFACE *IOVolume = NULL;
+	Status = ST->BootServices->HandleProtocol(loaded_image->DeviceHandle, &fsGuid, (void*)&IOVolume);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	return IOVolume->OpenVolume(IOVolume, Volume);
+}
+
+static EFI_STATUS openFileInVolume(EFI_FILE_HANDLE Volume, CHAR16 *FileName, EFI_FILE_HANDLE *FileHandle, UINT64 *FileSize)
+{
+	EFI_STATUS Status = Volume->Open(Volume, FileHandle, FileName, EFI_FILE_MODE_READ, 0);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	// Get size of file by seeking to the end, ...
+	Status = (*FileHandle)->SetPosition(*FileHandle, ~(UINT64)0);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	// ... querying the position, ...
+	Status = (*FileHandle)->GetPosition(*FileHandle, FileSize);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	// ... and seeking back again.
+	return (*FileHandle)->SetPosition(*FileHandle, 0);
+}
+
+EFI_STATUS loadKernelAndInitrd(EFI_HANDLE ImageHandle)
+{
+	// Open a handle to the ESP
+	EFI_FILE_HANDLE Volume;
+	EFI_STATUS Status = openVolumeOfImage(ImageHandle, &Volume);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	// Open handles to kernel and initrd
+	EFI_FILE_HANDLE KernelFile, InitrdFile;
+	UINT64 KernelSize, InitrdSize;
+	Status = openFileInVolume(Volume, L"Image", &KernelFile, &KernelSize);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	Status = openFileInVolume(Volume, L"initrd", &InitrdFile, &InitrdSize);
+	if (EFI_ERROR(Status))
+		return Status;
+
+	// Alloate memory region for initrd + kernel
+	// Add worst case padding for 2MiB kernel alignment.
+	UINTN payloadSize = InitrdSize + 2*1024*1024 + KernelSize;
+	VOID *payloadArea = allocPages((payloadSize + PAGE_SIZE - 1) / PAGE_SIZE);
+	if (payloadArea == NULL)
+		return EFI_OUT_OF_RESOURCES;
+
+	params.initrd_phys = (uint64_t) payloadArea;
+	params.initrd_len = InitrdSize;
+	params.kernel_phys = (params.initrd_phys + params.initrd_len + 2*1024*1024 - 1) & ~(UINT64)(2*1024*1024 - 1);
+	params.kernel_len = KernelSize;
+
+	// Load kernel into memory
+	UINT64 ActuallyRead = KernelSize;
+	Status = KernelFile->Read(KernelFile, &ActuallyRead, (void*)(params.kernel_phys));
+	if (EFI_ERROR(Status) || ActuallyRead != KernelSize)
+		return Status;
+
+	// Load initrd into memory
+	ActuallyRead = InitrdSize;
+	Status = InitrdFile->Read(InitrdFile, &ActuallyRead, (void*)(params.initrd_phys));
+	if (EFI_ERROR(Status) || ActuallyRead != InitrdSize)
+		return Status;
+
+	// Close all handles again
+	InitrdFile->Close(InitrdFile);
+	KernelFile->Close(KernelFile);
+	Volume->Close(Volume);
+
+	return EFI_SUCCESS;
+}
+
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
     EFI_STATUS Status;
@@ -172,12 +261,12 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	ST = SystemTable;
 
 	// Sign of life
-	Status = SystemTable->ConOut->OutputString(SystemTable->ConOut, L"Loading kernel...\r\n");
+	Status = SystemTable->ConOut->OutputString(SystemTable->ConOut, L"Loading risc86...\r\n");
 	if (EFI_ERROR(Status))
 		return Status;
 
 	// Load kernel and initrd
-	// TODO
+	loadKernelAndInitrd(ImageHandle);
 
 	// Allocate pml4
 	pml4 = allocPageTable();
