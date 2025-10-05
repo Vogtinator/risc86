@@ -30,11 +30,11 @@ touch "$1"
 
 # Run QEMU with fat emulation for the ESP
 qemu = find_program('qemu-system-x86_64')
-qemu_args = ['-accel', 'kvm',
-		     '-chardev', 'stdio,mux=on,id=out', '-serial', 'chardev:out', '-device', 'isa-debugcon,chardev=out',
-		     '-monitor', 'none', '-nographic', '-no-reboot',
-			 '-bios', '/usr/share/qemu/ovmf-x86_64.bin',
-			 '-drive', 'file=fat:' + qemu_esp_dir + ',readonly=on,if=virtio']
+qemu_args = ['-accel', 'kvm', '-m', '1G',
+             '-chardev', 'stdio,mux=on,id=out', '-serial', 'chardev:out', '-device', 'isa-debugcon,chardev=out',
+             '-monitor', 'none', '-nographic', '-no-reboot',
+             '-bios', '/usr/share/qemu/ovmf-x86_64.bin',
+             '-drive', 'file=fat:' + qemu_esp_dir + ',readonly=on,if=virtio']
 
 custom_target('qemu', output: 'none', command: [qemu, qemu_args], console: true,
               depends: [qemu_esp_fill], build_always_stale: true)
