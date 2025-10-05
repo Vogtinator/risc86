@@ -1,27 +1,15 @@
 #include <efi.h>
+#include "../kernel/loaderapi.h"
 
 #define PAGE_SIZE 4096
 
-// Internal kernel ABI constants
-static const UINTN KERNEL_STACK_LOW  = 0xFFFF800000000000UL,
-                   KERNEL_STACK_SIZE = 12 * 1024 * 1024,     // 12MiB
-                   KERNEL_LOAD_ADDR  = 0xFFFF810000000000UL,
-                   KERNEL_PHYS_START = 0xFFFF900000000000UL,
-                   KERNEL_PHYS_END   = 0xFFFFA00000000000UL;
+// Custom EFI_MEMORY_TYPE
+#define MEMORY_TYPE_PAYLOAD 0x80000001U
 
 // Embedded raw kernel binary to load
 alignas(PAGE_SIZE) static const UINT8 kernel[] = {
 #embed KERNEL_BIN_PATH
 };
-
-struct KernelParams {
-	uint64_t kernel_phys, kernel_len;
-	uint64_t initrd_phys, initrd_len;
-	struct MemoryAttrib {
-		uint64_t start, size;
-		uint64_t flags;
-	} memory_regions[256];
-} __attribute__ ((packed));
 
 static struct KernelParams params = { 0 };
 
@@ -44,11 +32,10 @@ void *memset(void *ptr, uint8_t val, size_t len)
 
 static EFI_SYSTEM_TABLE *ST = NULL;
 
-static void *allocPages(UINTN count)
+static void *allocPages(UINTN count, EFI_MEMORY_TYPE Type)
 {
 	EFI_PHYSICAL_ADDRESS ptr;
-	// TODO: Correct type? Can't be freed.
-	if (ST->BootServices->AllocatePages(AllocateAnyPages, EfiLoaderData, count, &ptr) != EFI_SUCCESS)
+	if (ST->BootServices->AllocatePages(AllocateAnyPages, Type, count, &ptr) != EFI_SUCCESS)
 		return NULL;
 
 	return (void*) ptr;
@@ -56,7 +43,7 @@ static void *allocPages(UINTN count)
 
 static UINTN *allocPageTable()
 {
-	UINTN *ret = allocPages(1);
+	UINTN *ret = allocPages(1, EfiLoaderData);
 	if (!ret)
 		return NULL;
 
@@ -225,7 +212,7 @@ EFI_STATUS loadKernelAndInitrd(EFI_HANDLE ImageHandle)
 	// Alloate memory region for initrd + kernel
 	// Add worst case padding for 2MiB kernel alignment.
 	UINTN payloadSize = InitrdSize + 2*1024*1024 + KernelSize;
-	VOID *payloadArea = allocPages((payloadSize + PAGE_SIZE - 1) / PAGE_SIZE);
+	VOID *payloadArea = allocPages((payloadSize + PAGE_SIZE - 1) / PAGE_SIZE, MEMORY_TYPE_PAYLOAD);
 	if (payloadArea == NULL)
 		return EFI_OUT_OF_RESOURCES;
 
@@ -274,7 +261,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		return EFI_OUT_OF_RESOURCES;
 
 	// Allocate stack
-	EFI_PHYSICAL_ADDRESS stackPhys = (EFI_PHYSICAL_ADDRESS) allocPages(KERNEL_STACK_SIZE / PAGE_SIZE);
+	EFI_PHYSICAL_ADDRESS stackPhys = (EFI_PHYSICAL_ADDRESS) allocPages(KERNEL_STACK_SIZE / PAGE_SIZE, EfiLoaderData);
 	if (!stackPhys)
 		return EFI_OUT_OF_RESOURCES;
 
@@ -300,8 +287,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	// Allocate space for the memory map + some slack
 	UINTN MemoryMapAllocSize = MemoryMapSize + 16 * DescriptorSize;
 	EFI_MEMORY_DESCRIPTOR *MemoryMap = NULL;
-	// TODO: Correct type? Can be freed.
-	Status = ST->BootServices->AllocatePool(EfiLoaderData, MemoryMapAllocSize, (void**) &MemoryMap);
+	// EfiBootServicesData -> can be reused by the kernel
+	Status = ST->BootServices->AllocatePool(EfiBootServicesData, MemoryMapAllocSize, (void**) &MemoryMap);
 	if (EFI_ERROR(Status))
 		return Status;
 
@@ -345,9 +332,35 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
 	for(UINTN i = 0; i < entry_count; ++i) {
 		EFI_MEMORY_DESCRIPTOR *map_entry = (EFI_MEMORY_DESCRIPTOR*) ((UINTN)MemoryMap + i * DescriptorSize);
-		params.memory_regions[i].start = map_entry->PhysicalStart;
-		params.memory_regions[i].size = map_entry->NumberOfPages * PAGE_SIZE;
-		params.memory_regions[i].flags = 0xcafebeef; // TODO
+
+		enum MemoryRegionType type = ~0;
+		switch (map_entry->Type)
+		{
+			case EfiBootServicesCode:
+			case EfiBootServicesData:
+			case EfiConventionalMemory:
+				type = MemRegionFree;
+				break;
+			case MEMORY_TYPE_PAYLOAD:
+				type = MemRegionPayload;
+				break;
+			default:
+				continue;
+		}
+
+		// Merge with previous entry if possible
+		if (params.memory_region_count > 0
+			&& params.memory_regions[params.memory_region_count - 1].type == type
+			&& (params.memory_regions[params.memory_region_count - 1].start + params.memory_regions[params.memory_region_count - 1].size) == map_entry->PhysicalStart)
+		{
+			params.memory_regions[params.memory_region_count - 1].size += map_entry->NumberOfPages * PAGE_SIZE;
+			continue;
+		}
+
+		params.memory_regions[params.memory_region_count].start = map_entry->PhysicalStart;
+		params.memory_regions[params.memory_region_count].size = map_entry->NumberOfPages * PAGE_SIZE;
+		params.memory_regions[params.memory_region_count].type = type;
+		params.memory_region_count++;
 	}
 
 	// Exit boot services
