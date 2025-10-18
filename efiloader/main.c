@@ -253,7 +253,11 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		return Status;
 
 	// Load kernel and initrd
-	loadKernelAndInitrd(ImageHandle);
+	Status = loadKernelAndInitrd(ImageHandle);
+	if (EFI_ERROR(Status)) {
+		ST->ConOut->OutputString(ST->ConOut, L"Failed to load Image and initrd\r\n");
+		return Status;
+	}
 
 	// Allocate pml4
 	pml4 = allocPageTable();
