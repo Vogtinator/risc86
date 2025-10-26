@@ -1,5 +1,3 @@
-# -mgeneral-regs-only: Until FPU initialization implemented
-cpp_args_arch = ['-mgeneral-regs-only']
 cpp_args = ['-static', '-fno-exceptions', '-fno-rtti', '-ffreestanding', '-nostdlib']
 
 # TODO: Is there a better way?
@@ -17,7 +15,7 @@ newlib = declare_dependency(compile_args: ['-isystem' + custom_prefix / 'include
                             link_args: ['-L' + custom_prefix / 'lib', '-lc'])
 
 kernel = executable('kernel',
-                    sources: ['main.cpp', 'newlib_stubs.cpp'],
+                    sources: ['main.cpp', 'mem.cpp', 'newlib_stubs.cpp', 'percpu.cpp', 'utils.cpp'],
 					cpp_args: cpp_args, pie: true,
 					link_args: link_args,
 					link_depends: [link_script],

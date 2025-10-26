@@ -1,0 +1,35 @@
+#pragma once
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "loaderapi.h"
+
+using PhysAddr = uintptr_t;
+using VirtAddr = void*;
+
+template <typename T>
+static T *phys_to_virt(uint64_t addr)
+{
+	return reinterpret_cast<T*>(KERNEL_PHYS_START + addr);
+}
+
+/* Class to manage physical memory in non-overlapping regions. */
+class PhysMemMgr {
+public:
+	struct Region {
+		PhysAddr start, end;
+		MemoryRegionType type;
+	};
+	
+	// Add a region of the specified type. Must not be overlapping with any existing region.
+	void addRegion(PhysAddr start, PhysAddr end, MemoryRegionType type);
+
+	// Allocate contiguous physical memory with given size. No alignment guaranteees.
+	PhysAddr allocate(size_t size, MemoryRegionType type);
+private:
+	size_t regionCount = 0;
+	Region regions[128];
+};
+
+extern PhysMemMgr physMemMgr;
