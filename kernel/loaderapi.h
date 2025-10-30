@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 // Define the virtual memory layout
@@ -13,6 +14,7 @@ static const uint64_t
 enum MemoryRegionType {
 	MemRegionFree = 0, // Free for any purposse
 	MemRegionPayload,  // Used for passed kernel and initrd, must be preserved
+	MemRegionZeroPage, // Used to reserve the first page
 	// Reserved memory is just omitted from the list
 };
 

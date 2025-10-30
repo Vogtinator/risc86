@@ -27,6 +27,12 @@ public:
 
 	// Allocate contiguous physical memory with given size. No alignment guaranteees.
 	PhysAddr allocate(size_t size, MemoryRegionType type);
+
+	// Print regions to the console for debugging.
+	void print();
+
+	// Get the total size of MemRegionFree regions.
+	size_t totalFreeBytes();
 private:
 	size_t regionCount = 0;
 	Region regions[128];

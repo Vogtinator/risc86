@@ -30,3 +30,41 @@ void PhysMemMgr::addRegion(PhysAddr start, PhysAddr end, MemoryRegionType type)
 
 	panic("Failed to add memory region"); // Unreachable
 }
+
+PhysAddr PhysMemMgr::allocate(size_t size, MemoryRegionType type)
+{
+	if (regionCount >= sizeof(regions) / sizeof(*regions))
+		panic("No space to add memory region for allocation (size %lu, type %u)", size, type);
+
+	for(size_t i = 0; i < regionCount; ++i) {
+		// Find a free region with enough space
+		if (regions[i].type != MemRegionFree
+		    || regions[i].end - regions[i].start + 1 < size)
+			continue;
+
+		// Create a new region with the requested size and type
+		memmove(&regions[i + 1], &regions[i], (regionCount - i) * sizeof(*regions));
+		regionCount++;
+		regions[i] = {.start = regions[i + 1].start, .end = regions[i + 1].start + size - 1, .type = type};
+		regions[i + 1].start += size;
+		return regions[i].start;
+	}
+
+	panic("No space to allocate %lu bytes of type %u", size, type);
+}
+
+void PhysMemMgr::print()
+{
+	for(size_t i = 0; i < regionCount; ++i)
+		printf("Region %02ld %09lx-%09lx %08d\n", i, regions[i].start, regions[i].end, regions[i].type);
+}
+
+size_t PhysMemMgr::totalFreeBytes()
+{
+	size_t ret = 0;
+	for(size_t i = 0; i < regionCount; ++i)
+		if (regions[i].type == MemRegionFree)
+			ret += regions[i].end - regions[i].start + 1;
+
+	return ret;
+}
