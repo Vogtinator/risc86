@@ -33,6 +33,19 @@ public:
 
 	// Get the total size of MemRegionFree regions.
 	size_t totalFreeBytes();
+
+	// Marks remaining free regions as MemRegionPayload
+	void markRestForPayload();
+
+	// Iterate all MemRegionPayload regions
+	template <typename T>
+	void iteratePayloadRegions(const T &callback)
+	{
+		for(size_t i = 0; i < regionCount; ++i)
+			if (regions[i].type == MemRegionPayload)
+				callback(regions[i]);
+	}
+
 private:
 	size_t regionCount = 0;
 	Region regions[128];

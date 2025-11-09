@@ -68,3 +68,10 @@ size_t PhysMemMgr::totalFreeBytes()
 
 	return ret;
 }
+
+void PhysMemMgr::markRestForPayload()
+{
+	for(size_t i = 0; i < regionCount; ++i)
+		if (regions[i].type == MemRegionFree)
+			regions[i].type = MemRegionPayload;
+}
