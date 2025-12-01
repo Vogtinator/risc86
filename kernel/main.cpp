@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+#include "cpu.h"
 #include "devicetree.h"
 #include "mem.h"
 #include "loaderapi.h"
@@ -40,8 +41,19 @@ __attribute__((noreturn)) __attribute__((section(".text.entry"))) void kernel_en
 	PhysAddr dtb = buildDeviceTreeBlob();
 	printf("Device tree @ %lx\n", dtb);
 
+	kernel_virt = phys_to_virt<uint8_t>(dtb);
+	printf("DTB %02x%02x%02x%02x%02x%02x%02x%02x\n", kernel_virt[0], kernel_virt[1], kernel_virt[2], kernel_virt[3], kernel_virt[4], kernel_virt[5], kernel_virt[6], kernel_virt[7]);
+
 	printf("Memory map at exit:\n");
 	physMemMgr.print();
+
+	// Set up hart 0 to jump to the kernel
+	auto *hart0 = &getPerCPU()->hart;
+	hart0->regs[10] = 0; // a0 = Hart ID
+	hart0->regs[11] = dtb; // a1 = phys addr of DT
+	hart0->pc = params->kernel_phys;
+
+	runThisCPU();
 
 	panic("Kernel exited");
 
