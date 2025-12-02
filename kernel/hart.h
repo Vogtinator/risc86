@@ -11,4 +11,5 @@ struct HartState {
 	uint64_t sie, sip;
 	uint64_t satp;
 	uint32_t scounteren; // Only & 3 supported
+	uint64_t stvec;
 };

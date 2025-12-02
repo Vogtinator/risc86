@@ -13,8 +13,10 @@ static bool fetchInstruction(HartState *hart, uint16_t *inst, uint64_t addr)
 
 	// TODO: iTLB, resp. use native load with trap
 	auto res = mmu_translate(hart, addr, AccessType::Exec);
-	if(!res.pageoff_mask)
-		return false; // TODO: Indicate instruction fault
+	if (!res.pageoff_mask) {
+		panic("Instruction fault"); // TODO: Indicate instruction fault
+		return false;
+	}
 
 	PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
 	*inst = *phys_to_virt<uint16_t>(phys);
@@ -28,8 +30,10 @@ template <typename T> bool virtRead(HartState *hart, uint64_t addr, T *value)
 		panic("Unaligned read");
 
 	auto res = mmu_translate(hart, addr, AccessType::Read);
-	if(!res.pageoff_mask)
-		return false; // TODO: Indicate fault
+	if (!res.pageoff_mask) {
+		panic("Read fault"); // TODO: Indicate fault
+		return false;
+	}
 
 	PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
 	*value = *phys_to_virt<T>(phys);
@@ -42,8 +46,10 @@ template <typename T> bool virtWrite(HartState *hart, uint64_t addr, T value)
 		panic("Unaligned read");
 
 	auto res = mmu_translate(hart, addr, AccessType::Write);
-	if(!res.pageoff_mask)
-		return false; // TODO: Indicate fault
+	if (!res.pageoff_mask) {
+		panic("Write fault"); // TODO: Indicate fault
+		return false;
+	}
 
 	PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
 	*phys_to_virt<T>(phys) = value;
@@ -96,6 +102,9 @@ static void setCSR(HartState *hart, uint16_t csr, uint64_t value)
 		return;
 	case 0x104u:
 		hart->sie = value;
+		return;
+	case 0x105u:
+		hart->stvec = value;
 		return;
 	case 0x106u:
 		hart->scounteren = value & 3;
@@ -173,17 +182,86 @@ void runThisCPU()
 				int32_t imm = int32_t(((imm17 << 17) | (imm1612 << 12)) << 14) >> 14;
 				uint32_t rd = (inst >> 7) & 0x1F;
 				setReg(hart, rd, uint64_t(imm));
+			} else if (inst == 0) { // Illegal (before c.addi4spn)
+				panic("Illegal 0000 instruction");
+			} else if ((inst & 0b111'00000000'000'11) == 0b000'00000000'000'00) { // c.addi4spn (after illegal)
+				uint16_t imm54 = (inst >> 11) & 3,
+						 imm96 = (inst >>  7) & 0xF,
+						 imm2  = (inst >>  6) & 1,
+						 imm3  = (inst >>  5) & 1;
+
+				uint16_t uimm = (imm96 << 6) | (imm54 << 4) | (imm3 << 3)
+						| (imm2 << 2);
+
+				uint32_t rd = ((inst >> 2) & 7) + 8;
+				setReg(hart, rd, getReg(hart, 2) + uimm);
 			} else if ((inst & 0b111'0'11111'00000'11) == 0b000'0'00000'00000'01) { // c.nop (before c.addi)
 				// nop
 			} else if ((inst & 0b111'0'00000'00000'11) == 0b000'0'00000'00000'01) { // c.addi (after c.nop)
 				uint16_t imm5  = (inst >> 12) & 1,
-						 imm40 = (inst >> 2) & 0x1F;
+						 imm40 = (inst >>  2) & 0x1F;
 
 				int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
 				uint32_t rd = (inst >> 7) & 0x1F;
 				setReg(hart, rd, getReg(hart, rd) + imm);
+			} else if ((inst & 0b111'000'000'00'000'11) == 0b011'000'000'00'000'00) { // c.ld
+				uint16_t imm53 = (inst >> 10) & 7,
+						 imm76 = (inst >>  5) & 3;
+
+				uint16_t off = (imm76 << 6) | (imm53 << 3);
+
+				uint32_t rs1 = ((inst >> 7) & 7) + 8,
+						 rd  = ((inst >> 2) & 7) + 8;
+
+				uint64_t value;
+				if (!virtRead<uint64_t>(hart, getReg(hart, rs1) + off, &value))
+					continue;
+
+				setReg(hart, rd, value);
+			} else if ((inst & 0b111'000'000'00'000'11) == 0b111'000'000'00'000'00) { // c.sd
+				uint16_t imm53 = (inst >> 10) & 7,
+						 imm76 = (inst >>  5) & 3;
+
+				uint16_t off = (imm76 << 6) | (imm53 << 3);
+
+				uint32_t rs1 = ((inst >> 7) & 7) + 8,
+						 rs2 = ((inst >> 2) & 7) + 8;
+
+				if (!virtWrite<uint64_t>(hart, getReg(hart, rs1) + off, getReg(hart, rs2)))
+					continue;
+			} else if ((inst & 0b111'1'00000'11111'11) == 0b100'0'00000'00000'10) { // c.jr (before c.mv)
+				uint32_t rs1 = (inst >> 7) & 0x1F;
+
+				if (rs1 == 0)
+					panic("Reserved c.???");
+
+				hart->pc = getReg(hart, rs1);
+			} else if ((inst & 0b111'1'00000'00000'11) == 0b100'0'00000'00000'10) { // c.mv (after c.jr)
+				uint32_t rs2 = (inst >> 2) & 0x1F,
+						 rd  = (inst >> 7) & 0x1F;
+
+				setReg(hart, rd, getReg(hart, rs2));
+			} else if ((inst & 0b111'1'11111'11111'11) == 0b100'1'00000'00000'10) { // c.ebreak
+				panic("c.ebreak not implemented");
+			} else if ((inst & 0b111'1'00000'11111'11) == 0b100'1'00000'00000'10) { // c.jalr (after c.ebreak)
+				panic("c.jalr not implemented");
+			} else if ((inst & 0b111'1'00000'00000'11) == 0b100'1'00000'00000'10) { // c.add (after c.jalr)
+				uint32_t rs2 = (inst >> 2) & 0x1F,
+						 rd  = (inst >> 7) & 0x1F;
+
+				setReg(hart, rd, getReg(hart, rd) + getReg(hart, rs2));
+			} else if ((inst & 0b111'000000'00000'11) == 0b111'000000'00000'10) { // c.sdsp
+				uint16_t imm53 = (inst >> 10) & 7,
+						 imm86 = (inst >>  7) & 7;
+
+				uint16_t off = (imm86 << 6) | (imm53 << 3);
+
+				uint32_t rs2 = ((inst >> 2) & 7) + 8;
+
+				if (!virtWrite<uint64_t>(hart, getReg(hart, 2) + off, getReg(hart, rs2)))
+					continue;
 			} else {
-				panic("Unknown instruction");
+				panic("Unknown instruction %04x", inst);
 			}
 
 			hart->pc += 2;
@@ -312,6 +390,12 @@ void runThisCPU()
 			}
 			break;
 		}
+		case 0x37u: // lui
+		{
+			uint32_t rd = (inst >> 7u) & 0x1Fu;
+			setReg(hart, rd, inst & 0xFFFFF000u);
+			break;
+		}
 		case 0x63u: // branch
 		{
 			uint32_t funct3 = (inst >> 12u) & 7u;
@@ -355,6 +439,17 @@ void runThisCPU()
 				continue;
 			}
 			break;
+		}
+		case 0x67u: // jalr
+		{
+			uint32_t rd = (inst >> 7u) & 0x1Fu;
+			uint32_t rs1 = (inst >> 15u) & 31u;
+			int32_t imm = int32_t(inst) >> 20u;
+
+			uint32_t retaddr = hart->pc + 4u;
+			hart->pc = getReg(hart, rs1) + imm;
+			setReg(hart, rd, retaddr);
+			continue;
 		}
 		case 0x73u: // SYSTEM
 		{
@@ -435,7 +530,7 @@ void runThisCPU()
 			continue;
 		}
 		default:
-			panic("Unknown instruction");
+			panic("Unknown instruction %08x", inst);
 		}
 
 		hart->pc += 4;
