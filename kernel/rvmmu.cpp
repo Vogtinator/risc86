@@ -1,7 +1,7 @@
 #include "rvmmu.h"
 #include "utils.h"
 
-TranslationResult mmu_translate(HartState *hart, uint64_t addr)
+TranslationResult mmu_translate(HartState *hart, uint64_t addr, AccessType type)
 {
 	if(hart->satp != 0)
 		panic("Not implemented");

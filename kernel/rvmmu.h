@@ -10,6 +10,10 @@ struct TranslationResult {
 	PhysAddr phys_page_addr;
 };
 
+enum class AccessType {
+	Read, Write, Exec
+};
+
 // On failure, MMU related registers in the hart will be set
 // to handle the fault.
-TranslationResult mmu_translate(HartState *hart, uint64_t addr);
+TranslationResult mmu_translate(HartState *hart, uint64_t addr, AccessType type);
