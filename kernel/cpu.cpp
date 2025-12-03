@@ -322,23 +322,23 @@ void runThisCPU()
 
 				setReg(hart, rd, value);
 			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'00'000'01) { // c.sub
-				uint32_t rs2 = ((inst >> 2) & 3) + 8,
-						 rd  = ((inst >> 7) & 3) + 8;
+				uint32_t rs2 = ((inst >> 2) & 7) + 8,
+						 rd  = ((inst >> 7) & 7) + 8;
 
 				setReg(hart, rd, getReg(hart, rd) - getReg(hart, rs2));
 			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'01'000'01) { // c.xor
-				uint32_t rs2 = ((inst >> 2) & 3) + 8,
-						 rd  = ((inst >> 7) & 3) + 8;
+				uint32_t rs2 = ((inst >> 2) & 7) + 8,
+						 rd  = ((inst >> 7) & 7) + 8;
 
 				setReg(hart, rd, getReg(hart, rd) ^ getReg(hart, rs2));
 			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'10'000'01) { // c.or
-				uint32_t rs2 = ((inst >> 2) & 3) + 8,
-						 rd  = ((inst >> 7) & 3) + 8;
+				uint32_t rs2 = ((inst >> 2) & 7) + 8,
+						 rd  = ((inst >> 7) & 7) + 8;
 
 				setReg(hart, rd, getReg(hart, rd) | getReg(hart, rs2));
 			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'11'000'01) { // c.and
-				uint32_t rs2 = ((inst >> 2) & 3) + 8,
-						 rd  = ((inst >> 7) & 3) + 8;
+				uint32_t rs2 = ((inst >> 2) & 7) + 8,
+						 rd  = ((inst >> 7) & 7) + 8;
 
 				setReg(hart, rd, getReg(hart, rd) & getReg(hart, rs2));
 			} else if ((inst & 0b111'000'000'00000'11) == 0b110'000'000'00000'01) { // c.beqz
