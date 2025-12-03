@@ -7,6 +7,33 @@
 
 extern KernelParams kernel_params;
 
+static void handleInterrupt(HartState *hart, uint64_t cause)
+{
+	hart->scause = cause;
+	hart->sepc = hart->pc;
+
+	uint64_t sstatus = hart->sstatus;
+
+	// Set mstatus.mpie to mstatus.mie
+	if ((sstatus & SSTATUS_SIE) != 0u)
+		sstatus |= SSTATUS_SPIE;
+	else
+		sstatus &= ~SSTATUS_SPIE;
+
+	// Clear mstatus.mie
+	sstatus &= ~SSTATUS_SIE;
+
+	// Set sstatus.spp to mode == MODE_USER
+	if (hart->mode == HartState::MODE_USER)
+		sstatus &= ~SSTATUS_SPP;
+	else
+		sstatus |= SSTATUS_SPP;
+
+	hart->sstatus = sstatus;
+	hart->pc = hart->stvec;
+	hart->mode = HartState::MODE_SUPERVISOR;
+}
+
 // Perform an instruction fetch of 16 bits at the given addr.
 // Returns false on fault.
 static bool fetchInstruction(HartState *hart, uint16_t *inst, uint64_t addr)
@@ -17,7 +44,8 @@ static bool fetchInstruction(HartState *hart, uint16_t *inst, uint64_t addr)
 	// TODO: iTLB, resp. use native load with trap
 	auto res = mmu_translate(hart, addr, AccessType::Exec);
 	if (!res.pageoff_mask) {
-		panic("Instruction fault"); // TODO: Indicate instruction fault
+		printf("Instruction fault at %lx\n", addr);
+		handleInterrupt(hart, HartState::SCAUSE_INSTR_PAGE_FAULT);
 		return false;
 	}
 
@@ -67,13 +95,28 @@ void dumpCPUState(HartState *hart)
 		(void*)(hart->pc - kernel_params.kernel_phys + 0xffffffff80000000),
 		(void*)(hart->pc - kernel_params.kernel_phys)
 	);
-	for(int i = 0; i < 32;)
+
+	// Print general regs
+	for (int i = 0; i < 32;)
 	{
 		printf("R%02d: %016lx ", i, hart->regs[i]);
 		i++;
 		printf("R%02d: %016lx\n", i, hart->regs[i]);
 		i++;
 	}
+
+	// Print CSRs
+	struct { uint64_t *ptr; const char *name; } csrs[] = {
+		#define REG(x) { &hart->x, # x }
+		REG(sstatus), REG(stvec), REG(sip), REG(sie), REG(sscratch),
+		REG(sepc), REG(scause), REG(stval), REG(satp),
+		#undef REG
+	};
+
+	for (auto csr : csrs)
+		printf("%7s: %016lx\n", csr.name, *csr.ptr);
+
+	printf("scounteren: %08x\n", hart->scounteren);
 }
 
 static inline uint64_t getReg(HartState *hart, int r)
@@ -93,6 +136,8 @@ static uint64_t getCSR(HartState *hart, uint16_t csr)
 	switch (csr) {
 	case 0x100u:
 		return hart->sstatus;
+	case 0x140u:
+		return hart->sscratch;
 	case 0x180u:
 		return hart->satp;
 	default:
@@ -117,6 +162,9 @@ static void setCSR(HartState *hart, uint16_t csr, uint64_t value)
 		return;
 	case 0x106u:
 		hart->scounteren = value & 3;
+		return;
+	case 0x140u:
+		hart->sscratch = value;
 		return;
 	case 0x144u:
 		hart->sip = value;
@@ -144,7 +192,7 @@ void runThisCPU()
 		// may cross a page boundary and fault.
 		uint16_t inst16;
 		if (!fetchInstruction(hart, &inst16, hart->pc))
-			panic("Instruction fault");
+			continue;
 
 		// 16-bit wide compressed instruction?
 		if ((inst16 & 0b11) != 0b11)
