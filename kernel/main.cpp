@@ -10,8 +10,11 @@
 #include "percpu.h"
 #include "utils.h"
 
+KernelParams kernel_params;
+
 __attribute__((noreturn)) __attribute__((section(".text.entry"))) void kernel_entry(KernelParams *params)
 {
+	kernel_params = *params;
 	puts("Starting kernel...");
 
 	// Set up per-CPU state for the boot CPU

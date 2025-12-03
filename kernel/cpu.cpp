@@ -1,8 +1,11 @@
 #include <stdio.h>
 
+#include "loaderapi.h"
 #include "percpu.h"
 #include "rvmmu.h"
 #include "utils.h"
+
+extern KernelParams kernel_params;
 
 // Perform an instruction fetch of 16 bits at the given addr.
 // Returns false on fault.
@@ -59,7 +62,11 @@ template <typename T> bool virtWrite(HartState *hart, uint64_t addr, T value)
 // Dump hart state using printf
 void dumpCPUState(HartState *hart)
 {
-	printf("PC: %016lx (vmlinux: %p)\n", hart->pc, (void*)(hart->pc - 0x3b800000 + 0xffffffff80000000));
+	printf("PC: %016lx (vmlinux: %p, offset: %p)\n",
+		hart->pc,
+		(void*)(hart->pc - kernel_params.kernel_phys + 0xffffffff80000000),
+		(void*)(hart->pc - kernel_params.kernel_phys)
+	);
 	for(int i = 0; i < 32;)
 	{
 		printf("R%02d: %016lx ", i, hart->regs[i]);
