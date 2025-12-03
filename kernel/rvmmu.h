@@ -14,6 +14,5 @@ enum class AccessType {
 	Read, Write, Exec
 };
 
-// On failure, MMU related registers in the hart will be set
-// to handle the fault.
+// On failure, sets hart->stval accordingly.
 TranslationResult mmu_translate(HartState *hart, uint64_t addr, AccessType type);
