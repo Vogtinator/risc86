@@ -203,7 +203,7 @@ void runThisCPU()
 
 				int32_t imm = int32_t(((imm17 << 17) | (imm1612 << 12)) << 14) >> 14;
 				uint32_t rd = (inst >> 7) & 0x1F;
-				setReg(hart, rd, uint64_t(imm));
+				setReg(hart, rd, int64_t(imm));
 			} else if (inst == 0) { // Illegal (before c.addi4spn)
 				panic("Illegal 0000 instruction");
 			} else if ((inst & 0b111'00000000'000'11) == 0b000'00000000'000'00) { // c.addi4spn (after illegal)
@@ -237,9 +237,16 @@ void runThisCPU()
 				uint16_t imm5  = (inst >> 12) & 1,
 						 imm40 = (inst >>  2) & 0x1F;
 
-				uint16_t imm = (imm5 << 5) | imm40 << 10;
+				uint16_t imm = (imm5 << 5) | imm40;
 				uint32_t rd = ((inst >> 7) & 7) + 8;
 				setReg(hart, rd, getReg(hart, rd) >> imm);
+			} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'01'000'00000'01) { // c.srai
+				uint16_t imm5  = (inst >> 12) & 1,
+						 imm40 = (inst >>  2) & 0x1F;
+
+				uint16_t imm = (imm5 << 5) | imm40;
+				uint32_t rd = ((inst >> 7) & 7) + 8;
+				setReg(hart, rd, int64_t(getReg(hart, rd)) >> imm);
 			} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'10'000'00000'01) { // c.andi
 				uint16_t imm5  = (inst >> 12) & 1,
 						 imm40 = (inst >>  2) & 0x1F;
@@ -261,6 +268,33 @@ void runThisCPU()
 					continue;
 
 				setReg(hart, rd, value);
+			} else if ((inst & 0b111'000'000'00'000'11) == 0b010'000'000'00'000'00) { // c.lw
+				uint16_t imm53 = (inst >> 10) & 7,
+						 imm2  = (inst >>  6) & 1,
+						 imm6  = (inst >>  5) & 1;
+
+				uint16_t off = (imm6 << 6) | (imm53 << 3) | (imm2 << 2);
+
+				uint32_t rs1 = ((inst >> 7) & 7) + 8,
+						 rd  = ((inst >> 2) & 7) + 8;
+
+				int32_t value;
+				if (!virtRead<int32_t>(hart, getReg(hart, rs1) + off, &value))
+					continue;
+
+				setReg(hart, rd, value);
+			} else if ((inst & 0b111'000'000'00'000'11) == 0b110'000'000'00'000'00) { // c.sw
+				uint16_t imm53 = (inst >> 10) & 7,
+						 imm2  = (inst >>  6) & 1,
+						 imm6  = (inst >>  5) & 1;
+
+				uint16_t off = (imm6 << 6) | (imm53 << 3) | (imm2 << 2);
+
+				uint32_t rs1 = ((inst >> 7) & 7) + 8,
+						 rs2 = ((inst >> 2) & 7) + 8;
+
+				if (!virtWrite<uint32_t>(hart, getReg(hart, rs1) + off, getReg(hart, rs2)))
+					continue;
 			} else if ((inst & 0b111'000'000'00'000'11) == 0b111'000'000'00'000'00) { // c.sd
 				uint16_t imm53 = (inst >> 10) & 7,
 						 imm76 = (inst >>  5) & 3;
@@ -308,6 +342,16 @@ void runThisCPU()
 
 				if (!virtWrite(hart, getReg(hart, 2) + off, getReg(hart, rs2)))
 					continue;
+			} else if ((inst & 0b111'000000'00000'11) == 0b110'000000'00000'10) { // c.swsp
+				uint16_t imm52 = (inst >>  9) & 0xF,
+						 imm76 = (inst >>  7) & 3;
+
+				uint16_t off = (imm76 << 6) | (imm52 << 2);
+
+				uint32_t rs2 = (inst >> 2) & 31;
+
+				if (!virtWrite<uint32_t>(hart, getReg(hart, 2) + off, uint32_t(getReg(hart, rs2))))
+					continue;
 			} else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'10) { // c.ldsp
 				uint16_t imm5  = (inst >> 12) & 1,
 						 imm43 = (inst >>  5) & 3,
@@ -321,6 +365,23 @@ void runThisCPU()
 					panic("Reserved instruction");
 
 				uint64_t value;
+				if (!virtRead(hart, getReg(hart, 2) + off, &value))
+					continue;
+
+				setReg(hart, rd, value);
+			} else if ((inst & 0b111'0'00000'00000'11) == 0b010'0'00000'00000'10) { // c.lwsp
+				uint16_t imm5  = (inst >> 12) & 1,
+						 imm42 = (inst >>  4) & 7,
+						 imm76 = (inst >>  2) & 3;
+
+				uint16_t off = (imm76 << 6) | (imm5 << 5) | (imm42 << 2);
+
+				uint32_t rd = (inst >> 7) & 31;
+
+				if (rd == 0)
+					panic("Reserved instruction");
+
+				int32_t value;
 				if (!virtRead(hart, getReg(hart, 2) + off, &value))
 					continue;
 
@@ -345,6 +406,16 @@ void runThisCPU()
 						 rd  = ((inst >> 7) & 7) + 8;
 
 				setReg(hart, rd, getReg(hart, rd) & getReg(hart, rs2));
+			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'1'11'000'00'000'01) { // c.subw
+				uint32_t rs2 = ((inst >> 2) & 7) + 8,
+						 rd  = ((inst >> 7) & 7) + 8;
+
+				setReg(hart, rd, int64_t(int32_t(getReg(hart, rd)) - int32_t(getReg(hart, rs2))));
+			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'1'11'000'01'000'01) { // c.addw
+				uint32_t rs2 = ((inst >> 2) & 7) + 8,
+						 rd  = ((inst >> 7) & 7) + 8;
+
+				setReg(hart, rd, int64_t(int32_t(getReg(hart, rd)) + int32_t(getReg(hart, rs2))));
 			} else if ((inst & 0b111'000'000'00000'11) == 0b110'000'000'00000'01) { // c.beqz
 				uint16_t imm8  = (inst >> 12) & 1,
 						 imm43 = (inst >> 10) & 3,
@@ -492,10 +563,10 @@ void runThisCPU()
 					setReg(hart, rd, (int64_t(getReg(hart, rs1)) < imm) ? 1u : 0u);
 					break;
 				case 0x3u: // sltiu
-					setReg(hart, rd, (getReg(hart, rs1) < rawimm) ? 1u : 0u);
+					setReg(hart, rd, (getReg(hart, rs1) < uint64_t(imm)) ? 1u : 0u);
 					break;
 				case 0x4u: // xori
-					setReg(hart, rd, getReg(hart, rs1) ^ rawimm);
+					setReg(hart, rd, getReg(hart, rs1) ^ imm);
 					break;
 				case 0x5u: // sr(l,a)i
 					if ((rawimm >> 6u) == 0) // srli
@@ -507,10 +578,10 @@ void runThisCPU()
 
 					break;
 				case 0x6u: // ori
-					setReg(hart, rd, getReg(hart, rs1) | rawimm);
+					setReg(hart, rd, getReg(hart, rs1) | imm);
 					break;
 				case 0x7u: // andi
-					setReg(hart, rd, getReg(hart, rs1) & rawimm);
+					setReg(hart, rd, getReg(hart, rs1) & imm);
 					break;
 				default:
 					panic("Unsupported instruction");
@@ -542,11 +613,11 @@ void runThisCPU()
 						panic("Shift not supported");
 
 					break;
-				case 0x5u: // sr(l,a)i
+				case 0x5u: // sr(l,a)iw
 					if ((rawimm >> 5u) == 0) // srliw
-						setReg(hart, rd, int64_t(int32_t(getReg(hart, rs1) >> (rawimm & 31u))));
-					else if ((rawimm >> 6u) == 0x10u) // srai
-						setReg(hart, rd, int64_t(int32_t(int64_t(getReg(hart, rs1)) >> (rawimm & 31u))));
+						setReg(hart, rd, int32_t(uint32_t(getReg(hart, rs1)) >> (rawimm & 31u)));
+					else if ((rawimm >> 6u) == 0x10u) // sraiw
+						setReg(hart, rd, int32_t(uint32_t(getReg(hart, rs1))) >> (rawimm & 31u));
 					else
 						panic("Shift not supported");
 
@@ -658,7 +729,37 @@ void runThisCPU()
 		case 0x37u: // lui
 		{
 			uint32_t rd = (inst >> 7u) & 0x1Fu;
-			setReg(hart, rd, inst & 0xFFFFF000u);
+			setReg(hart, rd, int64_t(int32_t(inst & 0xFFFFF000u)));
+			break;
+		}
+		case 0x3Bu: // integer register (RV64)
+		{
+			uint32_t funct3 = (inst >> 12u) & 7u;
+			uint32_t rd = (inst >> 7u) & 31u;
+			uint32_t rs1 = (inst >> 15u) & 31u;
+			uint32_t rs2 = (inst >> 20u) & 31u;
+			uint32_t funct7 = inst >> 25u;
+
+			switch((funct3 << 8u) | funct7)
+			{
+				case 0x000u: // addw
+					setReg(hart, rd, int64_t(int32_t(getReg(hart, rs1)) + int32_t(getReg(hart, rs2))));
+					break;
+				case 0x020u: // subw
+					setReg(hart, rd, int64_t(int32_t(getReg(hart, rs1)) - int32_t(getReg(hart, rs2))));
+					break;
+				case 0x100u: // sllw
+					setReg(hart, rd, int64_t(int32_t(getReg(hart, rs1)) << (getReg(hart, rs2) & 31u)));
+					break;
+				case 0x500u: // srlw
+					setReg(hart, rd, int64_t(int32_t(uint32_t(getReg(hart, rs1)) >> (getReg(hart, rs2) & 31u))));
+					break;
+				case 0x520u: // sraw
+					setReg(hart, rd, int64_t(int32_t(uint32_t(getReg(hart, rs1))) >> (getReg(hart, rs2) & 31u)));
+					break;
+				default:
+					panic("Unknown 32-bit reg-reg instruction");
+			}
 			break;
 		}
 		case 0x63u: // branch
@@ -733,9 +834,19 @@ void runThisCPU()
 			uint32_t funct3 = (inst >> 12u) & 0x7u;
 			switch(funct3)
 			{
-			case 0u: // FENCE:
-				printf("Doing some fencing\n");
+			case 0u: // Misc stuff
+			{
+				if (inst == 0x00000073u) {
+					panic("ecall");
+				} else if (inst == 0x00100073u) {
+					panic("ebreak");
+				} else if ((inst & 0b1111111'00000'00000'111'11111'1111111) == 0b0001001'00000'00000'000'00000'1110011) {
+					printf("Doing some fencing\n");
+				} else
+					panic("Unsupported misc instruction");
+
 				break;
+			}
 			case 1u: // CSRRW
 			{
 				uint16_t csr = inst >> 20u;
