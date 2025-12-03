@@ -59,7 +59,7 @@ template <typename T> bool virtWrite(HartState *hart, uint64_t addr, T value)
 // Dump hart state using printf
 void dumpCPUState(HartState *hart)
 {
-	printf("PC: %016lx\n", hart->pc);
+	printf("PC: %016lx (vmlinux: %p)\n", hart->pc, (void*)(hart->pc - 0x3b800000 + 0xffffffff80000000));
 	for(int i = 0; i < 32;)
 	{
 		printf("R%02d: %016lx ", i, hart->regs[i]);
@@ -86,6 +86,8 @@ static uint64_t getCSR(HartState *hart, uint16_t csr)
 	switch (csr) {
 	case 0x100u:
 		return hart->sstatus;
+	case 0x180u:
+		return hart->satp;
 	default:
 		panic("Unknown CSR read 0x%03x", csr);
 	}
@@ -111,6 +113,12 @@ static void setCSR(HartState *hart, uint16_t csr, uint64_t value)
 		return;
 	case 0x144u:
 		hart->sip = value;
+		return;
+	case 0x180u:
+		if ((value >> 60) == 0 || (value >> 60) == 8) // Only bare or Sv39
+			hart->satp = value;
+		else
+			dumpCPUState(hart);
 		return;
 	default:
 		panic("Unknown CSR write 0x%03x", csr);
@@ -162,6 +170,13 @@ void runThisCPU()
 				int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
 				uint32_t rd = (inst >> 7) & 0x1F;
 				setReg(hart, rd, uint64_t(imm));
+			} else if ((inst & 0b111'0'00000'00000'11) == 0b000'0'00000'00000'10) { // c.slli
+				uint16_t imm5  = (inst >> 12) & 1,
+						 imm40 = (inst >> 2) & 0x1F;
+
+				uint16_t imm = (imm5 << 5) | imm40;
+				uint32_t rd = (inst >> 7) & 0x1F;
+				setReg(hart, rd, getReg(hart, rd) << imm);
 			} else if ((inst & 0xEF83) == 0x6101) { // c.addi16sp (must come before c.lui)
 				uint16_t imm9  = (inst >> 12) & 1,
 						 imm4  = (inst >>  6) & 1,
@@ -172,7 +187,7 @@ void runThisCPU()
 				uint16_t uimm = (imm9 << 9) | (imm87 << 7) | (imm6 << 6)
 						| (imm5 << 5) | (imm4 << 4);
 
-				int16_t imm = int16_t(uimm << 5) >> 5;
+				int16_t imm = int16_t(uimm << 6) >> 6;
 				uint32_t rd = 2;
 				setReg(hart, rd, getReg(hart, 2) + imm);
 			} else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'01) { // c.lui (after c.addi16sp)
@@ -204,6 +219,27 @@ void runThisCPU()
 				int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
 				uint32_t rd = (inst >> 7) & 0x1F;
 				setReg(hart, rd, getReg(hart, rd) + imm);
+			} else if ((inst & 0b111'0'00000'00000'11) == 0b001'0'00000'00000'01) { // c.addiw
+				uint16_t imm5  = (inst >> 12) & 1,
+						 imm40 = (inst >>  2) & 0x1F;
+
+				int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
+				uint32_t rd = (inst >> 7) & 0x1F;
+				setReg(hart, rd, int64_t(int32_t(getReg(hart, rd) + imm)));
+			} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'00'000'00000'01) { // c.srli
+				uint16_t imm5  = (inst >> 12) & 1,
+						 imm40 = (inst >>  2) & 0x1F;
+
+				uint16_t imm = (imm5 << 5) | imm40 << 10;
+				uint32_t rd = ((inst >> 7) & 7) + 8;
+				setReg(hart, rd, getReg(hart, rd) >> imm);
+			} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'10'000'00000'01) { // c.andi
+				uint16_t imm5  = (inst >> 12) & 1,
+						 imm40 = (inst >>  2) & 0x1F;
+
+				int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
+				uint32_t rd = ((inst >> 7) & 7) + 8;
+				setReg(hart, rd, getReg(hart, rd) & uint64_t(imm));
 			} else if ((inst & 0b111'000'000'00'000'11) == 0b011'000'000'00'000'00) { // c.ld
 				uint16_t imm53 = (inst >> 10) & 7,
 						 imm76 = (inst >>  5) & 3;
@@ -236,6 +272,7 @@ void runThisCPU()
 					panic("Reserved c.???");
 
 				hart->pc = getReg(hart, rs1);
+				continue;
 			} else if ((inst & 0b111'1'00000'00000'11) == 0b100'0'00000'00000'10) { // c.mv (after c.jr)
 				uint32_t rs2 = (inst >> 2) & 0x1F,
 						 rd  = (inst >> 7) & 0x1F;
@@ -256,10 +293,83 @@ void runThisCPU()
 
 				uint16_t off = (imm86 << 6) | (imm53 << 3);
 
-				uint32_t rs2 = ((inst >> 2) & 7) + 8;
+				uint32_t rs2 = (inst >> 2) & 31;
 
-				if (!virtWrite<uint64_t>(hart, getReg(hart, 2) + off, getReg(hart, rs2)))
+				if (!virtWrite(hart, getReg(hart, 2) + off, getReg(hart, rs2)))
 					continue;
+			} else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'10) { // c.ldsp
+				uint16_t imm5  = (inst >> 12) & 1,
+						 imm43 = (inst >>  5) & 3,
+						 imm86 = (inst >>  2) & 7;
+
+				uint16_t off = (imm86 << 6) | (imm5 << 5) | (imm43 << 3);
+
+				uint32_t rd = (inst >> 7) & 31;
+
+				if (rd == 0)
+					panic("Reserved instruction");
+
+				uint64_t value;
+				if (!virtRead(hart, getReg(hart, 2) + off, &value))
+					continue;
+
+				setReg(hart, rd, value);
+			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'00'000'01) { // c.sub
+				uint32_t rs2 = ((inst >> 2) & 3) + 8,
+						 rd  = ((inst >> 7) & 3) + 8;
+
+				setReg(hart, rd, getReg(hart, rd) - getReg(hart, rs2));
+			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'01'000'01) { // c.xor
+				uint32_t rs2 = ((inst >> 2) & 3) + 8,
+						 rd  = ((inst >> 7) & 3) + 8;
+
+				setReg(hart, rd, getReg(hart, rd) ^ getReg(hart, rs2));
+			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'10'000'01) { // c.or
+				uint32_t rs2 = ((inst >> 2) & 3) + 8,
+						 rd  = ((inst >> 7) & 3) + 8;
+
+				setReg(hart, rd, getReg(hart, rd) | getReg(hart, rs2));
+			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'11'000'01) { // c.and
+				uint32_t rs2 = ((inst >> 2) & 3) + 8,
+						 rd  = ((inst >> 7) & 3) + 8;
+
+				setReg(hart, rd, getReg(hart, rd) & getReg(hart, rs2));
+			} else if ((inst & 0b111'000'000'00000'11) == 0b110'000'000'00000'01) { // c.beqz
+				uint16_t imm8  = (inst >> 12) & 1,
+						 imm43 = (inst >> 10) & 3,
+						 imm76 = (inst >>  5) & 3,
+						 imm21 = (inst >>  3) & 3,
+						 imm5  = (inst >>  2) & 1;
+
+				uint16_t uimm = (imm8 << 8) | (imm76 << 6) | (imm5 << 5) | (imm43 << 3)
+								| (imm21 << 1);
+
+				int16_t imm = int16_t(uimm << 7) >> 7;
+
+				uint32_t rs1 = ((inst >> 7) & 7) + 8;
+
+				if (getReg(hart, rs1) == 0) {
+					hart->pc += imm;
+					continue;
+				}
+			} else if ((inst & 0b111'000'000'00000'11) == 0b111'000'000'00000'01) { // c.bnez
+				uint16_t imm8  = (inst >> 12) & 1,
+						 imm43 = (inst >> 10) & 3,
+						 imm76 = (inst >>  5) & 3,
+						 imm21 = (inst >>  3) & 3,
+						 imm5  = (inst >>  2) & 1;
+
+				uint16_t uimm = (imm8 << 8) | (imm76 << 6) | (imm5 << 5) | (imm43 << 3)
+								| (imm21 << 1);
+
+				int16_t imm = int16_t(uimm << 7) >> 7;
+
+				uint32_t rs1 = ((inst >> 7) & 7) + 8;
+
+				if (getReg(hart, rs1) != 0) {
+					hart->pc += imm;
+					continue;
+				}
 			} else {
 				panic("Unknown instruction %04x", inst);
 			}
@@ -277,6 +387,77 @@ void runThisCPU()
 
 		uint32_t opc = inst & 0x7Fu;
 		switch(opc) {
+		case 0x03u: // load
+		{
+			uint32_t funct3 = (inst >> 12u) & 7u;
+			uint32_t rd = (inst >> 7u) & 31u;
+			uint32_t rs1 = (inst >> 15u) & 31u;
+			int32_t imm = int32_t(inst) >> 20u;
+
+			uint64_t addr = getReg(hart, rs1) + imm;
+			switch (funct3)
+			{
+				case 0u: { // lb
+					int8_t val;
+					if (!virtRead(hart, addr, &val))
+						continue;
+
+					setReg(hart, rd, int64_t(val));
+					break;
+				}
+				case 1u: { // lh
+					int16_t val;
+					if (!virtRead(hart, addr, &val))
+						continue;
+
+					setReg(hart, rd, int64_t(val));
+					break;
+				}
+				case 2u: { // lw
+					int32_t val;
+					if (!virtRead(hart, addr, &val))
+						continue;
+
+					setReg(hart, rd, int64_t(val));
+					break;
+				}
+				case 3u: { // ld
+					int64_t val;
+					if (!virtRead(hart, addr, &val))
+						continue;
+
+					setReg(hart, rd, val);
+					break;
+				}
+				case 4u: { // lbu
+					uint8_t val;
+					if (!virtRead(hart, addr, &val))
+						continue;
+
+					setReg(hart, rd, uint64_t(val));
+					break;
+				}
+				case 5u: { // lhu
+					uint16_t val;
+					if (!virtRead(hart, addr, &val))
+						continue;
+
+					setReg(hart, rd, uint64_t(val));
+					break;
+				}
+				case 6u: { // lwu
+					uint32_t val;
+					if (!virtRead(hart, addr, &val))
+						continue;
+
+					setReg(hart, rd, uint64_t(val));
+					break;
+				}
+				default:
+					panic("Unknown load instruction");
+			}
+			break;
+		}
 		case 0x13u: // integer immediate
 		{
 			uint32_t funct3 = (inst >> 12u) & 7u;
@@ -390,6 +571,79 @@ void runThisCPU()
 			}
 			break;
 		}
+		case 0x33u: // integer register
+		{
+			uint32_t funct3 = (inst >> 12u) & 7u;
+			uint32_t rd = (inst >> 7u) & 31u;
+			uint32_t rs1 = (inst >> 15u) & 31u;
+			uint32_t rs2 = (inst >> 20u) & 31u;
+			uint32_t funct7 = inst >> 25u;
+
+			switch((funct3 << 8u) | funct7)
+			{
+				case 0x000u: // add
+					setReg(hart, rd, getReg(hart, rs1) + getReg(hart, rs2));
+					break;
+				case 0x001u: // mul
+					setReg(hart, rd, getReg(hart, rs1) * getReg(hart, rs2));
+					break;
+				case 0x020u: // sub
+					setReg(hart, rd, getReg(hart, rs1) - getReg(hart, rs2));
+					break;
+				case 0x100u: // sll
+					setReg(hart, rd, getReg(hart, rs1) << (getReg(hart, rs2) & 63u));
+					break;
+				case 0x200u: // slt
+					setReg(hart, rd, int64_t(getReg(hart, rs1)) < int64_t(getReg(hart, rs2)) ? 1u : 0u);
+					break;
+				case 0x300u: // sltu
+					setReg(hart, rd, (getReg(hart, rs1) < getReg(hart, rs2)) ? 1u : 0u);
+					break;
+				case 0x400u: // xor
+					setReg(hart, rd, getReg(hart, rs1) ^ getReg(hart, rs2));
+					break;
+				case 0x401u: // div
+					if (getReg(hart, rs2) == 0)
+						setReg(hart, rd, ~uint64_t(0));
+					else if (int64_t(getReg(hart, rs1)) == INT64_MIN && int64_t(getReg(hart, rs2)) == -1)
+						setReg(hart, rd, uint64_t(INT64_MIN));
+					else
+						setReg(hart, rd, int64_t(getReg(hart, rs1)) / int64_t(getReg(hart, rs2)));
+
+					break;
+				case 0x500u: // srl
+					setReg(hart, rd, getReg(hart, rs1) >> (getReg(hart, rs2) & 63u));
+					break;
+				case 0x501u: // divu
+					if (getReg(hart, rs2) == 0)
+						setReg(hart, rd, ~uint64_t(0));
+					else
+						setReg(hart, rd, getReg(hart, rs1) / getReg(hart, rs2));
+
+					break;
+				case 0x520u: // sra
+					setReg(hart, rd, int64_t(getReg(hart, rs1)) >> (getReg(hart, rs2) & 63u));
+					break;
+				case 0x600u: // or
+					setReg(hart, rd, getReg(hart, rs1) | getReg(hart, rs2));
+					break;
+				case 0x601u: // rem
+					// TODO: Signedness correct?
+					// TODO: special case handling
+					setReg(hart, rd, int64_t(getReg(hart, rs1)) % int64_t(getReg(hart, rs2)));
+					break;
+				case 0x700u: // and
+					setReg(hart, rd, getReg(hart, rs1) & getReg(hart, rs2));
+					break;
+				case 0x701u: // remu
+					// TODO: special case handling
+					setReg(hart, rd, getReg(hart, rs1) % getReg(hart, rs2));
+					break;
+				default:
+					panic("Unknown reg-reg instruction");
+			}
+			break;
+		}
 		case 0x37u: // lui
 		{
 			uint32_t rd = (inst >> 7u) & 0x1Fu;
@@ -451,11 +705,26 @@ void runThisCPU()
 			setReg(hart, rd, retaddr);
 			continue;
 		}
+		case 0x6fu: // jal
+		{
+			uint32_t rd = (inst >> 7u) & 0x1Fu;
+			uint32_t imm20 = inst >> 31u;
+			uint32_t imm101 = (inst >> 21u) & 0x3FFu;
+			uint32_t imm11 = (inst >> 20u) & 1u;
+			uint32_t imm1912 = (inst >> 12u) & 0xFFu;
+			int32_t imm = int32_t(((imm20 << 20u) | (imm1912 << 12u) | (imm11 << 11u) | (imm101 << 1u)) << 11u) >> 11u;
+			setReg(hart, rd, hart->pc + 4u);
+			hart->pc += imm;
+			continue;
+		}
 		case 0x73u: // SYSTEM
 		{
 			uint32_t funct3 = (inst >> 12u) & 0x7u;
 			switch(funct3)
 			{
+			case 0u: // FENCE:
+				printf("Doing some fencing\n");
+				break;
 			case 1u: // CSRRW
 			{
 				uint16_t csr = inst >> 20u;

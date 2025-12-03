@@ -3,8 +3,8 @@
 
 TranslationResult mmu_translate(HartState *hart, uint64_t addr, AccessType type)
 {
-	if(hart->satp != 0)
-		panic("Not implemented");
+	if (hart->satp >> 60)
+		panic("Not implemented %016lx", hart->satp);
 
 	// Identity map: Return a 1GiB region that contains the address.
 	uint64_t mask_1gb = (1UL << 30) - 1;

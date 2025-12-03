@@ -20,6 +20,10 @@ PhysAddr buildDeviceTreeBlob()
 	fdt_setprop_u32(dt_virt, root_ofs, "#size-cells", 2);
 	fdt_setprop_string(dt_virt, root_ofs, "compatible", "risc86");
 
+	// Chosen node
+	const int chosen_ofs = fdt_add_subnode(dt_virt, root_ofs, "chosen");
+	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "debug loglevel=9 earlyprintk=sbi earlycon=sbi keep_bootcon");
+
 	// CPUs subnode
 	const int cpus_ofs = fdt_add_subnode(dt_virt, root_ofs, "cpus");
 	fdt_setprop_u32(dt_virt, cpus_ofs, "#address-cells", 1);
@@ -39,7 +43,7 @@ PhysAddr buildDeviceTreeBlob()
 		for (const char *ext : (const char*[]){"i", "m", "a", "c", "zicsr", "zifencei"})
 			fdt_appendprop_string(dt_virt, cpu_ofs, "riscv,isa-extensions", ext);
 
-		fdt_setprop_string(dt_virt, cpu_ofs, "mmu-type", "riscv,sv48");
+		fdt_setprop_string(dt_virt, cpu_ofs, "mmu-type", "riscv,sv39");
 
 		const int cpu_intc_ofs = fdt_add_subnode(dt_virt, cpu_ofs, "interrupt-controller");
 		fdt_setprop_u32(dt_virt, cpu_intc_ofs, "#interrupt-cells", 1);
