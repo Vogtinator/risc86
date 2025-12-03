@@ -516,7 +516,7 @@ void runThisCPU()
 		case 0x17u: // auipc
 		{
 			uint32_t rd = (inst >> 7u) & 0x1Fu;
-			setReg(hart, rd, hart->pc + (inst & 0xFFFFF000u));
+			setReg(hart, rd, hart->pc + int32_t(inst & 0xFFFFF000u));
 			break;
 		}
 		case 0x1Bu: // integer immediate (RV64I)
@@ -707,7 +707,7 @@ void runThisCPU()
 			uint32_t rs1 = (inst >> 15u) & 31u;
 			int32_t imm = int32_t(inst) >> 20u;
 
-			uint32_t retaddr = hart->pc + 4u;
+			uint64_t retaddr = hart->pc + 4u;
 			hart->pc = getReg(hart, rs1) + imm;
 			setReg(hart, rd, retaddr);
 			continue;
