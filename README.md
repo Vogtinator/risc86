@@ -29,6 +29,7 @@ First, newlib needs to be built with the flags mentioned in kernel/meson.build:
 wget ftp://sourceware.org/pub/newlib/newlib-4.5.0.20241231.tar.gz
 tar xf newlib-4.5.0.20241231.tar.gz
 cd newlib-4.5.0.20241231
+export CC_FOR_TARGET=gcc AR_FOR_TARGET=ar READELF_FOR_TARGET=readelf RANLIB_FOR_TARGET=ranlib CFLAGS_FOR_TARGET="-g -O2 -fPIE -Wa,--noexecstack"
 ./configure --target=x86_64-pc-none --disable-multilib --disable-newlib-wide-orient --disable-newlib-atexit-dynamic-alloc --disable-newlib-supplied-syscalls
 make -j8
 make DESTDIR="$PWD/../prefix" install -j8
