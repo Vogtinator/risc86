@@ -288,7 +288,11 @@ void runThisCPU()
 			} else if ((inst & 0b111'1'11111'11111'11) == 0b100'1'00000'00000'10) { // c.ebreak
 				panic("c.ebreak not implemented");
 			} else if ((inst & 0b111'1'00000'11111'11) == 0b100'1'00000'00000'10) { // c.jalr (after c.ebreak)
-				panic("c.jalr not implemented");
+				uint32_t rs1 = (inst >> 7u) & 0x1Fu;
+				uint64_t retaddr = hart->pc + 2u;
+				hart->pc = getReg(hart, rs1);
+				setReg(hart, 1, retaddr);
+				continue;
 			} else if ((inst & 0b111'1'00000'00000'11) == 0b100'1'00000'00000'10) { // c.add (after c.jalr)
 				uint32_t rs2 = (inst >> 2) & 0x1F,
 						 rd  = (inst >> 7) & 0x1F;
