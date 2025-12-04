@@ -6,6 +6,8 @@
 #define SSTATUS_SPIE (1ull << 5)
 #define SSTATUS_SPP (1ull << 8)
 
+#define SIP_STIP (1ull << 5)
+
 struct HartState {
 	// regs[0] is always 0, never written to
 	uint64_t regs[32];
@@ -22,6 +24,7 @@ struct HartState {
 		SCAUSE_INSTR_PAGE_FAULT = 12,
 		SCAUSE_LOAD_PAGE_FAULT = 13,
 		SCAUSE_STORE_PAGE_FAULT = 15,
+		SCAUSE_INTERRUPT_BASE = 1ull << 63,
 	};
 
 	// CSRs
@@ -34,4 +37,5 @@ struct HartState {
 	uint64_t scause;
 	uint64_t stval;
 	uint64_t satp;
+	uint64_t stimecmp;
 };

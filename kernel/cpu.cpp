@@ -15,7 +15,7 @@ static void handleInterrupt(HartState *hart, uint64_t cause)
 
 	uint64_t sstatus = hart->sstatus;
 
-	// Set mstatus.mpie to mstatus.mie
+	// Set sstatus.spie to sstatus.sie
 	if ((sstatus & SSTATUS_SIE) != 0u)
 		sstatus |= SSTATUS_SPIE;
 	else
@@ -33,6 +33,44 @@ static void handleInterrupt(HartState *hart, uint64_t cause)
 	hart->sstatus = sstatus;
 	hart->pc = hart->stvec;
 	hart->mode = HartState::MODE_SUPERVISOR;
+}
+
+static void handleSRET(HartState *hart)
+{
+	uint64_t sstatus = hart->sstatus;
+
+	// Set sstatus.spie to sstatus.sie
+	if ((sstatus & SSTATUS_SPIE) != 0u)
+		sstatus |= SSTATUS_SIE;
+	else
+		sstatus &= ~SSTATUS_SIE;
+
+	// Go into sstatus.spp mode
+	hart->mode = (sstatus & SSTATUS_SPP) ? HartState::MODE_SUPERVISOR : HartState::MODE_USER;
+
+	// Set sstatus.spp to U
+	sstatus &= SSTATUS_SPP;
+
+	hart->sstatus = sstatus;
+	hart->pc = hart->sepc;
+}
+
+// Hack
+static uint64_t global_time = 0;
+
+static void handlePendingInterrupts(HartState *hart)
+{
+	if (global_time >= hart->stimecmp)
+		hart->sip |= SIP_STIP;
+
+	if((hart->sstatus & SSTATUS_SIE) || hart->mode == HartState::MODE_USER)
+	{
+		uint64_t ipend = hart->sip & hart->sie;
+		if(ipend & SIP_STIP)
+			handleInterrupt(hart, HartState::SCAUSE_INTERRUPT_BASE + 5); // IRQ 5
+		else if (ipend)
+			panic("Unknown interrupt pending");
+	}
 }
 
 // Perform an instruction fetch of 16 bits at the given addr.
@@ -140,13 +178,20 @@ static uint64_t getCSR(HartState *hart, uint16_t csr)
 	switch (csr) {
 	case 0x100u:
 		return hart->sstatus;
+	case 0x104u:
+		return hart->sie;
 	case 0x140u:
 		return hart->sscratch;
+	case 0x141u:
+		return hart->sepc;
+	case 0x142u:
+		return hart->scause;
+	case 0x143u:
+		return hart->stval;
 	case 0x180u:
 		return hart->satp;
 	case 0xc01u:
-		static uint64_t time = 0;
-		return time++;
+		return global_time;
 	default:
 		panic("Unknown CSR read 0x%03x", csr);
 	}
@@ -173,8 +218,14 @@ static void setCSR(HartState *hart, uint16_t csr, uint64_t value)
 	case 0x140u:
 		hart->sscratch = value;
 		return;
+	case 0x141u:
+		hart->sepc = value;
+		return;
 	case 0x144u:
 		hart->sip = value;
+		return;
+	case 0x14du:
+		hart->stimecmp = value;
 		return;
 	case 0x180u:
 		if ((value >> 60) == 0 || (value >> 60) == 8) // Only bare or Sv39
@@ -194,6 +245,8 @@ void runThisCPU()
 	for(;;)
 	{
 		//dumpCPUState(hart);
+		global_time++;
+		handlePendingInterrupts(hart);
 
 		// Fetch 16 bits at a time. Due to IALIGN=16, a 32-bit wide instruction
 		// may cross a page boundary and fault.
@@ -1106,6 +1159,9 @@ void runThisCPU()
 					panic("ebreak");
 				} else if ((inst & 0b1111111'00000'00000'111'11111'1111111) == 0b0001001'00000'00000'000'00000'1110011) {
 					//printf("Doing some fencing\n");
+				} else if (inst == 0x10200073) {
+					handleSRET(hart);
+					continue;
 				} else
 					panic("Unsupported misc instruction");
 
@@ -1117,9 +1173,10 @@ void runThisCPU()
 				unsigned int rd = (inst >> 7u) & 31u;
 				unsigned int rs1 = (inst >> 15u) & 31u;
 				uint64_t rs1val = getReg(hart, rs1);
-				if (rd != 0u) { // No getCSR side effect if rd is zero
+
+				if (rd != 0u) // No getCSR side effect if rd is zero
 					setReg(hart, rd, getCSR(hart, csr));
-				}
+
 				setCSR(hart, csr, rs1val);
 				break;
 			}
@@ -1148,6 +1205,7 @@ void runThisCPU()
 
 				if (rs1 != 0) // No setCSR side effect if rs1 is zero
 					setCSR(hart, csr, csrval & ~rs1val);
+
 				break;
 			}
 			case 5u: // CSRRWI
