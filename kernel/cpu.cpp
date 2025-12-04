@@ -244,9 +244,11 @@ void runThisCPU()
 
 	for(;;)
 	{
-		//dumpCPUState(hart);
-		global_time++;
-		handlePendingInterrupts(hart);
+		static uint32_t counter = 0;
+		if ((counter++ % 1024) == 0) {
+			global_time++;
+			handlePendingInterrupts(hart);
+		}
 
 		// Fetch 16 bits at a time. Due to IALIGN=16, a 32-bit wide instruction
 		// may cross a page boundary and fault.
