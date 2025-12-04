@@ -22,7 +22,7 @@ PhysAddr buildDeviceTreeBlob()
 
 	// Chosen node
 	const int chosen_ofs = fdt_add_subnode(dt_virt, root_ofs, "chosen");
-	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "debug loglevel=9 earlyprintk=sbi earlycon=sbi keep_bootcon");
+	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "debug loglevel=9 earlycon=sbi keep_bootcon");
 
 	// CPUs subnode
 	const int cpus_ofs = fdt_add_subnode(dt_virt, root_ofs, "cpus");
@@ -40,7 +40,7 @@ PhysAddr buildDeviceTreeBlob()
 		fdt_setprop_string(dt_virt, cpu_ofs, "status", "okay");
 		fdt_setprop_string(dt_virt, cpu_ofs, "compatible", "riscv");
 		fdt_setprop_string(dt_virt, cpu_ofs, "riscv,isa-base", "rv64i");
-		for (const char *ext : (const char*[]){"i", "m", "a", "c", "svade", "zicsr", "zifencei"})
+		for (const char *ext : (const char*[]){"i", "m", "a", "c", "svade", "sstc", "zicsr", "zifencei"})
 			fdt_appendprop_string(dt_virt, cpu_ofs, "riscv,isa-extensions", ext);
 
 		fdt_setprop_string(dt_virt, cpu_ofs, "mmu-type", "riscv,sv39");
@@ -48,7 +48,7 @@ PhysAddr buildDeviceTreeBlob()
 		const int cpu_intc_ofs = fdt_add_subnode(dt_virt, cpu_ofs, "interrupt-controller");
 		fdt_setprop_u32(dt_virt, cpu_intc_ofs, "#interrupt-cells", 1);
 		fdt_setprop_string(dt_virt, cpu_intc_ofs, "compatible", "riscv,cpu-intc");
-		// TODO: how to set "interrupt-contoller;"?
+		fdt_setprop_empty(dt_virt, cpu_intc_ofs, "interrupt-controller");
 	}
 
 	// Mark all remainig free memory as used by the guest
@@ -60,7 +60,7 @@ PhysAddr buildDeviceTreeBlob()
 			char mem_nodename[] = "memory@XXXXXXXXXXXXXXXX";
 			snprintf(mem_nodename, sizeof(mem_nodename), "memory@%lx", region.start);
 			const int mem_ofs = fdt_add_subnode(dt_virt, root_ofs, mem_nodename);
-			fdt_setprop_string(dt_virt, mem_ofs, "device-type", "memory");
+			fdt_setprop_string(dt_virt, mem_ofs, "device_type", "memory");
 			fdt_appendprop_u64(dt_virt, mem_ofs, "reg", region.start);
 			fdt_appendprop_u64(dt_virt, mem_ofs, "reg", region.end - region.start + 1);
 		}

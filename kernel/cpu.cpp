@@ -3,6 +3,7 @@
 #include "loaderapi.h"
 #include "percpu.h"
 #include "rvmmu.h"
+#include "sbi.h"
 #include "utils.h"
 
 extern KernelParams kernel_params;
@@ -143,6 +144,9 @@ static uint64_t getCSR(HartState *hart, uint16_t csr)
 		return hart->sscratch;
 	case 0x180u:
 		return hart->satp;
+	case 0xc01u:
+		static uint64_t time = 0;
+		return time++;
 	default:
 		panic("Unknown CSR read 0x%03x", csr);
 	}
@@ -520,6 +524,8 @@ void runThisCPU()
 
 		uint32_t opc = inst & 0x7Fu;
 		switch(opc) {
+		case 0x0fu: // fences
+			break;
 		case 0x03u: // load
 		{
 			uint32_t funct3 = (inst >> 12u) & 7u;
@@ -734,6 +740,41 @@ void runThisCPU()
 					setReg(hart, rd, int64_t(int32_t(val)));
 					break;
 				}
+				case 0x204u: // amoswap.w
+				{
+					uint64_t addr = getReg(hart, rs1);
+					uint32_t val;
+					if (!virtRead<uint32_t>(hart, addr, &val))
+						continue;
+
+					if (!virtWrite<uint32_t>(hart, addr, getReg(hart, rs2)))
+						continue;
+
+					setReg(hart, rd, int64_t(int32_t(val)));
+					break;
+				}
+				case 0x208u: // lr.w
+				{
+					if (rs2 != 0u)
+						panic("lr with non-zero");
+
+					uint64_t addr = getReg(hart, rs1);
+					uint32_t val;
+					if (!virtRead<uint32_t>(hart, addr, &val))
+						continue;
+
+					setReg(hart, rd, int32_t(val));
+					break;
+				}
+				case 0x20cu: // sc.w
+				{
+					uint64_t addr = getReg(hart, rs1);
+					if (!virtWrite<uint32_t>(hart, addr, getReg(hart, rs2)))
+						continue;
+
+					setReg(hart, rd, 0u);
+					break;
+				}
 				case 0x300u: // amoadd.d
 				{
 					uint64_t addr = getReg(hart, rs1);
@@ -766,8 +807,6 @@ void runThisCPU()
 					if (rs2 != 0u)
 						panic("lr with non-zero");
 
-					printf("lr-sc not implemented\n");
-
 					uint64_t addr = getReg(hart, rs1);
 					uint64_t val;
 					if (!virtRead<uint64_t>(hart, addr, &val))
@@ -778,7 +817,6 @@ void runThisCPU()
 				}
 				case 0x30cu: // sc.d
 				{
-					printf("lr-sc not implemented\n");
 					uint64_t addr = getReg(hart, rs1);
 					if (!virtWrite<uint64_t>(hart, addr, getReg(hart, rs2)))
 						continue;
@@ -852,11 +890,20 @@ void runThisCPU()
 				case 0x100u: // sll
 					setReg(hart, rd, getReg(hart, rs1) << (getReg(hart, rs2) & 63u));
 					break;
+				case 0x101u: // mulh
+					setReg(hart, rd, (__int128_t(int64_t(getReg(hart, rs1))) * __int128_t(int64_t(getReg(hart, rs2)))) >> 64);
+					break;
 				case 0x200u: // slt
 					setReg(hart, rd, int64_t(getReg(hart, rs1)) < int64_t(getReg(hart, rs2)) ? 1u : 0u);
 					break;
+				case 0x201u: // mulhsu
+					setReg(hart, rd, (__int128_t(int64_t(getReg(hart, rs1))) * __uint128_t(getReg(hart, rs2))) >> 64);
+					break;
 				case 0x300u: // sltu
 					setReg(hart, rd, (getReg(hart, rs1) < getReg(hart, rs2)) ? 1u : 0u);
+					break;
+				case 0x301u: // mulhu
+					setReg(hart, rd, (__uint128_t(getReg(hart, rs1)) * __uint128_t(getReg(hart, rs2))) >> 64);
 					break;
 				case 0x400u: // xor
 					setReg(hart, rd, getReg(hart, rs1) ^ getReg(hart, rs2));
@@ -1050,12 +1097,15 @@ void runThisCPU()
 			{
 			case 0u: // Misc stuff
 			{
-				if (inst == 0x00000073u) {
-					panic("ecall");
+				if (inst == 0x00000073u) { // ecall
+					if (hart->mode == HartState::MODE_SUPERVISOR)
+						handleSBICall(hart);
+					else
+						panic("ecall in user mode not implemented");
 				} else if (inst == 0x00100073u) {
 					panic("ebreak");
 				} else if ((inst & 0b1111111'00000'00000'111'11111'1111111) == 0b0001001'00000'00000'000'00000'1110011) {
-					printf("Doing some fencing\n");
+					//printf("Doing some fencing\n");
 				} else
 					panic("Unsupported misc instruction");
 
@@ -1081,7 +1131,10 @@ void runThisCPU()
 				uint64_t csrval = getCSR(hart, csr);
 				uint64_t rs1val = getReg(hart, rs1);
 				setReg(hart, rd, getCSR(hart, csr));
-				setCSR(hart, csr, csrval | rs1val);
+
+				if (rs1 != 0) // No setCSR side effect if rs1 is zero
+					setCSR(hart, csr, csrval | rs1val);
+
 				break;
 			}
 			case 3u: // CSRRC
@@ -1092,16 +1145,18 @@ void runThisCPU()
 				uint64_t csrval = getCSR(hart, csr);
 				uint64_t rs1val = getReg(hart, rs1);
 				setReg(hart, rd, getCSR(hart, csr));
-				setCSR(hart, csr, csrval & ~rs1val);
+
+				if (rs1 != 0) // No setCSR side effect if rs1 is zero
+					setCSR(hart, csr, csrval & ~rs1val);
 				break;
 			}
 			case 5u: // CSRRWI
 			{
 				uint16_t csr = inst >> 20u;
 				unsigned int rd = (inst >> 7u) & 31u;
-				if (rd != 0u) { // No getCSR side effect if rd is zero
+				if (rd != 0u) // No getCSR side effect if rd is zero
 					setReg(hart, rd, getCSR(hart, csr));
-				}
+
 				uint64_t imm = (inst >> 15u) & 31u;
 				setCSR(hart, csr, imm);
 				break;
