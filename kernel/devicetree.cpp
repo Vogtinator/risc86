@@ -3,6 +3,8 @@
 
 #include "devicetree.h"
 
+extern KernelParams kernel_params;
+
 PhysAddr buildDeviceTreeBlob()
 {
 	const size_t dtb_maxsize = 8 * 1024;
@@ -23,6 +25,11 @@ PhysAddr buildDeviceTreeBlob()
 	// Chosen node
 	const int chosen_ofs = fdt_add_subnode(dt_virt, root_ofs, "chosen");
 	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "debug loglevel=9 earlycon=sbi keep_bootcon");
+
+	if (kernel_params.initrd_len) {
+		fdt_setprop_u64(dt_virt, chosen_ofs, "linux,initrd-start", kernel_params.initrd_phys);
+		fdt_setprop_u64(dt_virt, chosen_ofs, "linux,initrd-end", kernel_params.initrd_phys + kernel_params.initrd_len);
+	}
 
 	// CPUs subnode
 	const int cpus_ofs = fdt_add_subnode(dt_virt, root_ofs, "cpus");
