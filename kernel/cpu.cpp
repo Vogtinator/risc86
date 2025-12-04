@@ -903,6 +903,19 @@ void runThisCPU()
 					setReg(hart, rd, val);
 					break;
 				}
+				case 0x220u: // amoor.w
+				{
+					uint64_t addr = getReg(hart, rs1);
+					uint32_t val;
+					if (!virtRead<uint32_t>(hart, addr, &val))
+						continue;
+
+					if (!virtWrite<uint32_t>(hart, addr, val | getReg(hart, rs2)))
+						continue;
+
+					setReg(hart, rd, val);
+					break;
+				}
 				case 0x330u: // amoand.d
 				{
 					uint64_t addr = getReg(hart, rs1);
