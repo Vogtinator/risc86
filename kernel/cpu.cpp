@@ -114,7 +114,7 @@ void dumpCPUState(HartState *hart)
 	};
 
 	for (auto csr : csrs)
-		printf("%7s: %016lx\n", csr.name, *csr.ptr);
+		printf("%8s: %016lx\n", csr.name, *csr.ptr);
 
 	printf("scounteren: %08x\n", hart->scounteren);
 }
@@ -511,7 +511,7 @@ void runThisCPU()
 		// (at least) 32-bit wide instruction. Fetch the remaining 16 bits.
 		uint32_t inst = inst16;
 		if (!fetchInstruction(hart, &inst16, hart->pc + 2))
-			panic("Instruction fault");
+			continue;
 
 		inst |= inst16 << 16;
 
