@@ -12,9 +12,11 @@ enum {
 	SBI_EXT_PUTC = 0x01,
 	SBI_EXT_BASE = 0x10,
 	SBI_EXT_TIME = 0x54494D45,
-	SBI_EXT_sPI = 0x735049,
+	SBI_EXT_sPI  = 0x735049,
 	SBI_EXT_RFNC = 0x52464E43,
 	SBI_EXT_SRST = 0x53525354,
+	SBI_EXT_HSM  = 0x48534d,
+	SBI_EXT_PMU  = 0x504D55,
 };
 
 static uint64_t sbiCall(HartState *hart, uint64_t *result)
@@ -43,6 +45,8 @@ static uint64_t sbiCall(HartState *hart, uint64_t *result)
 			case SBI_EXT_TIME:
 			case SBI_EXT_sPI:
 			case SBI_EXT_RFNC:
+			case SBI_EXT_HSM:
+			case SBI_EXT_PMU:
 				*result = 0;
 				break;
 			default:
