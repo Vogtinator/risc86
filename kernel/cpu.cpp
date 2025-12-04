@@ -759,15 +759,21 @@ void runThisCPU()
 					break;
 				case 0x601u: // rem
 					// TODO: Signedness correct?
-					// TODO: special case handling
-					setReg(hart, rd, int64_t(getReg(hart, rs1)) % int64_t(getReg(hart, rs2)));
+					if (getReg(hart, rs2) == 0)
+						setReg(hart, rd, getReg(hart, rs1));
+					else if (int64_t(getReg(hart, rs1)) == INT64_MIN && int64_t(getReg(hart, rs2)) == -1)
+						setReg(hart, rd, 0);
+					else
+						setReg(hart, rd, int64_t(getReg(hart, rs1)) % int64_t(getReg(hart, rs2)));
 					break;
 				case 0x700u: // and
 					setReg(hart, rd, getReg(hart, rs1) & getReg(hart, rs2));
 					break;
 				case 0x701u: // remu
-					// TODO: special case handling
-					setReg(hart, rd, getReg(hart, rs1) % getReg(hart, rs2));
+					if (getReg(hart, rs2) == 0)
+						setReg(hart, rd, getReg(hart, rs1));
+					else
+						setReg(hart, rd, getReg(hart, rs1) % getReg(hart, rs2));
 					break;
 				default:
 					panic("Unknown reg-reg instruction");
@@ -793,17 +799,48 @@ void runThisCPU()
 				case 0x000u: // addw
 					setReg(hart, rd, int64_t(int32_t(getReg(hart, rs1)) + int32_t(getReg(hart, rs2))));
 					break;
+				case 0x001u: // mulw
+					setReg(hart, rd, int64_t(int32_t(getReg(hart, rs1)) * int32_t(getReg(hart, rs2))));
+					break;
 				case 0x020u: // subw
 					setReg(hart, rd, int64_t(int32_t(getReg(hart, rs1)) - int32_t(getReg(hart, rs2))));
 					break;
 				case 0x100u: // sllw
 					setReg(hart, rd, int64_t(int32_t(getReg(hart, rs1)) << (getReg(hart, rs2) & 31u)));
 					break;
+				case 0x401u: // divw
+					if (uint32_t(getReg(hart, rs2)) == 0)
+						setReg(hart, rd, ~uint64_t(0));
+					else if (int32_t(getReg(hart, rs1)) == INT32_MIN && int32_t(getReg(hart, rs2)) == -1)
+						setReg(hart, rd, int64_t(INT32_MIN));
+					else
+						setReg(hart, rd, int64_t(int32_t(getReg(hart, rs1)) / int32_t(getReg(hart, rs2))));
+					break;
 				case 0x500u: // srlw
 					setReg(hart, rd, int64_t(int32_t(uint32_t(getReg(hart, rs1)) >> (getReg(hart, rs2) & 31u))));
 					break;
+				case 0x501u: // divuw
+					if (uint32_t(getReg(hart, rs2)) == 0)
+						setReg(hart, rd, ~uint64_t(0));
+					else
+						setReg(hart, rd, int64_t(int32_t(uint32_t(getReg(hart, rs1)) / uint32_t(getReg(hart, rs2)))));
+					break;
 				case 0x520u: // sraw
 					setReg(hart, rd, int64_t(int32_t(uint32_t(getReg(hart, rs1))) >> (getReg(hart, rs2) & 31u)));
+					break;
+				case 0x601u: // remw
+					if (uint32_t(getReg(hart, rs2)) == 0)
+						setReg(hart, rd, int64_t(int32_t(getReg(hart, rs1))));
+					else if (int32_t(getReg(hart, rs1)) == INT32_MIN && int32_t(getReg(hart, rs2)) == -1)
+						setReg(hart, rd, 0);
+					else
+						setReg(hart, rd, int64_t(int32_t(int32_t(getReg(hart, rs1)) % int32_t(getReg(hart, rs2)))));
+					break;
+				case 0x701u: // remuw
+					if (uint32_t(getReg(hart, rs2)) == 0)
+						setReg(hart, rd, int64_t(int32_t(getReg(hart, rs1))));
+					else
+						setReg(hart, rd, int64_t(int32_t(uint32_t(getReg(hart, rs1)) % uint32_t(getReg(hart, rs2)))));
 					break;
 				default:
 					panic("Unknown 32-bit reg-reg instruction");
