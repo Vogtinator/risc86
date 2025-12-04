@@ -36,7 +36,8 @@ static void handleInterrupt(HartState *hart, uint64_t cause)
 
 // Perform an instruction fetch of 16 bits at the given addr.
 // Returns false on fault.
-static bool fetchInstruction(HartState *hart, uint16_t *inst, uint64_t addr)
+static __attribute__((warn_unused_result))
+bool fetchInstruction(HartState *hart, uint16_t *inst, uint64_t addr)
 {
 	if (addr & (sizeof(uint16_t) - 1))
 		panic("Unaligned instruction fetch");
@@ -55,7 +56,8 @@ static bool fetchInstruction(HartState *hart, uint16_t *inst, uint64_t addr)
 }
 
 // TODO: Use native mov with trap here
-template <typename T> bool virtRead(HartState *hart, uint64_t addr, T *value)
+template <typename T> __attribute__((warn_unused_result))
+bool virtRead(HartState *hart, uint64_t addr, T *value)
 {
 	if (addr & (sizeof(T) - 1))
 		panic("Unaligned read");
@@ -71,7 +73,8 @@ template <typename T> bool virtRead(HartState *hart, uint64_t addr, T *value)
 	return true;
 }
 
-template <typename T> bool virtWrite(HartState *hart, uint64_t addr, T value)
+template <typename T> __attribute__((warn_unused_result))
+bool virtWrite(HartState *hart, uint64_t addr, T value)
 {
 	if (addr & (sizeof(T) - 1))
 		panic("Unaligned read");
@@ -685,19 +688,145 @@ void runThisCPU()
 			switch (funct3)
 			{
 			case 0u: // sb
-				virtWrite<uint8_t>(hart, addr, getReg(hart, rs2));
+				if (!virtWrite<uint8_t>(hart, addr, getReg(hart, rs2)))
+					continue;
 				break;
 			case 1u: // sh
-				virtWrite<uint16_t>(hart, addr, getReg(hart, rs2));
+				if (!virtWrite<uint16_t>(hart, addr, getReg(hart, rs2)))
+					continue;
 				break;
 			case 2u: // sw
-				virtWrite<uint32_t>(hart, addr, getReg(hart, rs2));
+				if (!virtWrite<uint32_t>(hart, addr, getReg(hart, rs2)))
+					continue;
 				break;
 			case 3u: // sd
-				virtWrite<uint64_t>(hart, addr, getReg(hart, rs2));
+				if (!virtWrite<uint64_t>(hart, addr, getReg(hart, rs2)))
+					continue;
 				break;
 			default:
 				panic("Unknown store");
+			}
+			break;
+		}
+		case 0x2fu: // atomic extension
+		{
+			uint32_t funct3 = (inst >> 12u) & 7u;
+			uint32_t rd = (inst >> 7u) & 31u;
+			uint32_t rs1 = (inst >> 15u) & 31u;
+			uint32_t rs2 = (inst >> 20u) & 31u;
+			uint32_t funct7 = inst >> 25u;
+
+			// ignore aq and rl bits
+			funct7 &= ~3u;
+
+			switch((funct3 << 8u) | funct7)
+			{
+				case 0x200u: // amoadd.w
+				{
+					uint64_t addr = getReg(hart, rs1);
+					uint32_t val;
+					if (!virtRead<uint32_t>(hart, addr, &val))
+						continue;
+
+					if (!virtWrite<uint32_t>(hart, addr, val + uint32_t(getReg(hart, rs2))))
+						continue;
+
+					setReg(hart, rd, int64_t(int32_t(val)));
+					break;
+				}
+				case 0x300u: // amoadd.d
+				{
+					uint64_t addr = getReg(hart, rs1);
+					uint64_t val;
+					if (!virtRead<uint64_t>(hart, addr, &val))
+						continue;
+
+					if (!virtWrite<uint64_t>(hart, addr, val + getReg(hart, rs2)))
+						continue;
+
+					setReg(hart, rd, val);
+					break;
+				}
+				case 0x304u: // amoswap.d
+				{
+					// TODO: Is this correct? Several docs disagree...
+					uint64_t addr = getReg(hart, rs1);
+					uint64_t val;
+					if (!virtRead<uint64_t>(hart, addr, &val))
+						continue;
+
+					if (!virtWrite<uint64_t>(hart, addr, getReg(hart, rs2)))
+						continue;
+
+					setReg(hart, rd, val);
+					break;
+				}
+				case 0x308u: // lr.d
+				{
+					if (rs2 != 0u)
+						panic("lr with non-zero");
+
+					printf("lr-sc not implemented\n");
+
+					uint64_t addr = getReg(hart, rs1);
+					uint64_t val;
+					if (!virtRead<uint64_t>(hart, addr, &val))
+						continue;
+
+					setReg(hart, rd, val);
+					break;
+				}
+				case 0x30cu: // sc.d
+				{
+					printf("lr-sc not implemented\n");
+					uint64_t addr = getReg(hart, rs1);
+					if (!virtWrite<uint64_t>(hart, addr, getReg(hart, rs2)))
+						continue;
+
+					setReg(hart, rd, 0u);
+					break;
+				}
+				case 0x310u: // amoxor.d
+				{
+					uint64_t addr = getReg(hart, rs1);
+					uint64_t val;
+					if (!virtRead<uint64_t>(hart, addr, &val))
+						continue;
+
+					if (!virtWrite<uint64_t>(hart, addr, val ^ getReg(hart, rs2)))
+						continue;
+
+					setReg(hart, rd, val);
+					break;
+				}
+				case 0x320u: // amoor.d
+				{
+					uint64_t addr = getReg(hart, rs1);
+					uint64_t val;
+					if (!virtRead<uint64_t>(hart, addr, &val))
+						continue;
+
+					if (!virtWrite<uint64_t>(hart, addr, val | getReg(hart, rs2)))
+						continue;
+
+					setReg(hart, rd, val);
+					break;
+				}
+				case 0x330u: // amoand.d
+				{
+					uint64_t addr = getReg(hart, rs1);
+					uint64_t val;
+					if (!virtRead<uint64_t>(hart, addr, &val))
+						continue;
+
+					if (!virtWrite<uint64_t>(hart, addr, val & getReg(hart, rs2)))
+						continue;
+
+					setReg(hart, rd, val);
+					break;
+				}
+				default:
+					panic("Unimplemented atomic instruction");
 			}
 			break;
 		}
