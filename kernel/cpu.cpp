@@ -39,8 +39,8 @@ static void handleSRET(HartState *hart)
 {
 	uint64_t sstatus = hart->sstatus;
 
-	// Set sstatus.spie to sstatus.sie
-	if ((sstatus & SSTATUS_SPIE) != 0u)
+	// Set sstatus.sie to sstatus.spie
+	if (sstatus & SSTATUS_SPIE)
 		sstatus |= SSTATUS_SIE;
 	else
 		sstatus &= ~SSTATUS_SIE;
@@ -49,7 +49,7 @@ static void handleSRET(HartState *hart)
 	hart->mode = (sstatus & SSTATUS_SPP) ? HartState::MODE_SUPERVISOR : HartState::MODE_USER;
 
 	// Set sstatus.spp to U
-	sstatus &= SSTATUS_SPP;
+	sstatus &= ~SSTATUS_SPP;
 
 	hart->sstatus = sstatus;
 	hart->pc = hart->sepc;
