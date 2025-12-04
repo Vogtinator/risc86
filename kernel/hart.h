@@ -19,6 +19,7 @@ struct HartState {
 	} mode;
 
 	enum {
+		SCAUSE_EBREAK = 3,
 		SCAUSE_ECALL_UMODE = 8,
 		SCAUSE_ECALL_SMODE = 9,
 		SCAUSE_INSTR_PAGE_FAULT = 12,

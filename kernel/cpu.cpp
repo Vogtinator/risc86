@@ -103,7 +103,7 @@ bool virtRead(HartState *hart, uint64_t addr, T *value)
 
 	auto res = mmu_translate(hart, addr, AccessType::Read);
 	if (!res.pageoff_mask) {
-		panic("Read fault"); // TODO: Indicate fault
+		handleInterrupt(hart, HartState::SCAUSE_LOAD_PAGE_FAULT);
 		return false;
 	}
 
@@ -120,7 +120,7 @@ bool virtWrite(HartState *hart, uint64_t addr, T value)
 
 	auto res = mmu_translate(hart, addr, AccessType::Write);
 	if (!res.pageoff_mask) {
-		panic("Write fault"); // TODO: Indicate fault
+		handleInterrupt(hart, HartState::SCAUSE_STORE_PAGE_FAULT);
 		return false;
 	}
 
@@ -428,7 +428,8 @@ void runThisCPU()
 
 				setReg(hart, rd, getReg(hart, rs2));
 			} else if ((inst & 0b111'1'11111'11111'11) == 0b100'1'00000'00000'10) { // c.ebreak
-				panic("c.ebreak not implemented");
+				handleInterrupt(hart, HartState::SCAUSE_EBREAK);
+				continue;
 			} else if ((inst & 0b111'1'00000'11111'11) == 0b100'1'00000'00000'10) { // c.jalr (after c.ebreak)
 				uint32_t rs1 = (inst >> 7u) & 0x1Fu;
 				uint64_t retaddr = hart->pc + 2u;
@@ -1166,8 +1167,10 @@ void runThisCPU()
 				if (inst == 0x00000073u) { // ecall
 					if (hart->mode == HartState::MODE_SUPERVISOR)
 						handleSBICall(hart);
-					else
-						panic("ecall in user mode not implemented");
+					else {
+						handleInterrupt(hart, HartState::SCAUSE_ECALL_UMODE);
+						continue;
+					}
 				} else if (inst == 0x00100073u) {
 					panic("ebreak");
 				} else if ((inst & 0b1111111'00000'00000'111'11111'1111111) == 0b0001001'00000'00000'000'00000'1110011) {
