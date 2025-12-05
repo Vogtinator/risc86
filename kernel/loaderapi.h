@@ -30,5 +30,5 @@ struct KernelParams {
 	struct {
 		uint64_t start, size;
 		enum MemoryRegionType type;
-	} memory_regions[128];
+	} memory_regions[512];
 } __attribute__ ((packed));
