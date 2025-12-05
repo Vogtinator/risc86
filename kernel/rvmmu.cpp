@@ -36,7 +36,6 @@ TranslationResult mmu_translate(HartState *hart, uint64_t addr, AccessType type)
 
 	// Set stval and return an invalid translation
 	auto fault = [&] () {
-		hart->stval = addr;
 		return TranslationResult { 0, 0 };
 	};
 

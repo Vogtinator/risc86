@@ -8,9 +8,10 @@
 
 extern KernelParams kernel_params;
 
-static void handleInterrupt(HartState *hart, uint64_t cause)
+static void handleInterrupt(HartState *hart, uint64_t cause, uint64_t stval)
 {
 	hart->scause = cause;
+	hart->stval = stval;
 	hart->sepc = hart->pc;
 
 	uint64_t sstatus = hart->sstatus;
@@ -69,7 +70,7 @@ static void handlePendingInterrupts(HartState *hart)
 	{
 		uint64_t ipend = hart->sip & hart->sie;
 		if(ipend & SIP_STIP)
-			handleInterrupt(hart, HartState::SCAUSE_INTERRUPT_BASE + 5); // IRQ 5
+			handleInterrupt(hart, HartState::SCAUSE_INTERRUPT_BASE + 5, 0); // IRQ 5
 		else if (ipend)
 			panic("Unknown interrupt pending");
 	}
@@ -86,8 +87,7 @@ bool fetchInstruction(HartState *hart, uint16_t *inst, uint64_t addr)
 	// TODO: iTLB, resp. use native load with trap
 	auto res = mmu_translate(hart, addr, AccessType::Exec);
 	if (!res.pageoff_mask) {
-		printf("Instruction fault at %lx\n", addr);
-		handleInterrupt(hart, HartState::SCAUSE_INSTR_PAGE_FAULT);
+		handleInterrupt(hart, HartState::SCAUSE_INSTR_PAGE_FAULT, addr);
 		return false;
 	}
 
@@ -105,7 +105,7 @@ bool virtRead(HartState *hart, uint64_t addr, T *value)
 
 	auto res = mmu_translate(hart, addr, AccessType::Read);
 	if (!res.pageoff_mask) {
-		handleInterrupt(hart, HartState::SCAUSE_LOAD_PAGE_FAULT);
+		handleInterrupt(hart, HartState::SCAUSE_LOAD_PAGE_FAULT, addr);
 		return false;
 	}
 
@@ -122,7 +122,7 @@ bool virtWrite(HartState *hart, uint64_t addr, T value)
 
 	auto res = mmu_translate(hart, addr, AccessType::Write);
 	if (!res.pageoff_mask) {
-		handleInterrupt(hart, HartState::SCAUSE_STORE_PAGE_FAULT);
+		handleInterrupt(hart, HartState::SCAUSE_STORE_PAGE_FAULT, addr);
 		return false;
 	}
 
@@ -432,7 +432,7 @@ void runThisCPU()
 
 				setReg(hart, rd, getReg(hart, rs2));
 			} else if ((inst & 0b111'1'11111'11111'11) == 0b100'1'00000'00000'10) { // c.ebreak
-				handleInterrupt(hart, HartState::SCAUSE_EBREAK);
+				handleInterrupt(hart, HartState::SCAUSE_EBREAK, 0);
 				continue;
 			} else if ((inst & 0b111'1'00000'11111'11) == 0b100'1'00000'00000'10) { // c.jalr (after c.ebreak)
 				uint32_t rs1 = (inst >> 7u) & 0x1Fu;
@@ -1172,7 +1172,7 @@ void runThisCPU()
 					if (hart->mode == HartState::MODE_SUPERVISOR)
 						handleSBICall(hart);
 					else {
-						handleInterrupt(hart, HartState::SCAUSE_ECALL_UMODE);
+						handleInterrupt(hart, HartState::SCAUSE_ECALL_UMODE, 0);
 						continue;
 					}
 				} else if (inst == 0x00100073u) {
