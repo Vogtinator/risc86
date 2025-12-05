@@ -406,8 +406,25 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	if (EFI_ERROR(Status))
 		return Status;
 
+	UINTN ptr = 0x0007040600070406;
+	UINT32 ptr_lo = (UINT32)ptr, ptr_hi = ptr >> 32;
+	__asm volatile("wrmsr" :: "a" (ptr_lo), "d" (ptr_hi), "c" (0x277) : "memory");
+
+	__asm volatile("mov %%cr0, %%rbx\n"
+				   "and $~(1 << 30), %%rbx\n"
+				   "and $~(1 << 2), %%rbx\n"
+				   "or $(1 << 1), %%rbx\n"
+				   "mov %%rbx, %%cr0\n" ::: "rbx");
+
+	__asm volatile("mov %%cr4, %%rbx\n"
+				   "or $(1 << 9), %%rbx\n"
+				   "or $(1 << 10), %%rbx\n"
+				   "or $(1 << 16), %%rbx\n"
+				   "or $(1 << 18), %%rbx\n"
+				   "mov %%rbx, %%cr4\n" ::: "rbx");
+
 	// Enable paging
-	__asm volatile("mov %[pml4], %%cr3\n" :: [pml4] "r" (pml4));
+	__asm volatile("cli; mov %[pml4], %%cr3\n" :: [pml4] "r" (pml4));
 
 	// Set up stack and jump to kernel
 	__asm volatile("mov %[stack_high], %%rsp\n"
