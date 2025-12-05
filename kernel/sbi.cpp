@@ -62,12 +62,12 @@ static uint64_t sbiCall(HartState *hart, uint64_t *result)
 			return SBI_SUCCESS;
 		}
 		break;
+	// Legacy PUTC/GETC has a different ABI: R10 is the return value.
 	case SBI_EXT_PUTC:
 		putchar(hart->regs[10] & 0xFF);
-		return SBI_SUCCESS;
+		return 0; // Actually void
 	case SBI_EXT_GETC:
-		*result = ~0ul;
-		return SBI_ERR_NOT_SUPPORTED;
+		return ~0ul;
 	case SBI_EXT_SRST:
 		if (func == 0)
 			panic("SBI system reset type %lx reason %lx", hart->regs[10], hart->regs[11]);
