@@ -24,7 +24,7 @@ PhysAddr buildDeviceTreeBlob()
 
 	// Chosen node
 	const int chosen_ofs = fdt_add_subnode(dt_virt, root_ofs, "chosen");
-	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "debug loglevel=9 earlycon=sbi keep_bootcon");
+	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "debug loglevel=9 earlycon=sbi console=hvc0 security=selinux systemd.log_level=debug systemd.log_target=console");
 
 	if (kernel_params.initrd_len) {
 		fdt_setprop_u64(dt_virt, chosen_ofs, "linux,initrd-start", kernel_params.initrd_phys);

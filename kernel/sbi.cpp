@@ -10,6 +10,7 @@ enum {
 
 enum {
 	SBI_EXT_PUTC = 0x01,
+	SBI_EXT_GETC = 0x02,
 	SBI_EXT_BASE = 0x10,
 	SBI_EXT_TIME = 0x54494D45,
 	SBI_EXT_sPI  = 0x735049,
@@ -62,8 +63,11 @@ static uint64_t sbiCall(HartState *hart, uint64_t *result)
 		}
 		break;
 	case SBI_EXT_PUTC:
-		putchar(hart->regs[10]);
+		putchar(hart->regs[10] & 0xFF);
 		return SBI_SUCCESS;
+	case SBI_EXT_GETC:
+		*result = ~0ul;
+		return SBI_ERR_NOT_SUPPORTED;
 	case SBI_EXT_SRST:
 		if (func == 0)
 			panic("SBI system reset type %lx reason %lx", hart->regs[10], hart->regs[11]);
