@@ -1,4 +1,4 @@
-c_args = ['-static', '-ffreestanding', '-nostdlib']
+c_args = ['-ffreestanding', '-nostdlib']
 cpp_args = c_args + ['-fno-exceptions', '-fno-rtti']
 
 # TODO: Is there a better way?
