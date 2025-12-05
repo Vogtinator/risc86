@@ -1335,6 +1335,15 @@ void runThisCPU()
 			}
 			break;
 		}
+		case 0x43u: // FP
+		case 0x53u: // FP
+		{
+			if (faultOnFSOff(hart, inst))
+				continue;
+
+			printf("Unknown FP instruction %x\n", inst);
+			break;
+		}
 		case 0x63u: // branch
 		{
 			uint32_t funct3 = (inst >> 12u) & 7u;
