@@ -1124,6 +1124,32 @@ void runThisCPU()
 					setReg(hart, rd, val);
 					break;
 				}
+				case 0x270u: // amomaxu.w
+				{
+					uint64_t addr = getReg(hart, rs1);
+					uint32_t val;
+					if (!virtRead(hart, addr, &val))
+						continue;
+
+					if (!virtWrite(hart, addr, max(val, uint32_t(getReg(hart, rs2)))))
+						continue;
+
+					setReg(hart, rd, int64_t(int32_t(val)));
+					break;
+				}
+				case 0x370u: // amomaxu
+				{
+					uint64_t addr = getReg(hart, rs1);
+					uint64_t val;
+					if (!virtRead(hart, addr, &val))
+						continue;
+
+					if (!virtWrite(hart, addr, max(val, getReg(hart, rs2))))
+						continue;
+
+					setReg(hart, rd, val);
+					break;
+				}
 				default:
 					panic("Unimplemented atomic instruction");
 			}
