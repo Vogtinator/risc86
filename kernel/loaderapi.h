@@ -22,6 +22,10 @@ enum MemoryRegionType {
 struct KernelParams {
 	uint64_t kernel_phys, kernel_len;
 	uint64_t initrd_phys, initrd_len;
+	struct {
+		uint64_t phys;
+		uint32_t width, height, pitch, bpp;
+	} fb;
 	size_t memory_region_count;
 	struct {
 		uint64_t start, size;

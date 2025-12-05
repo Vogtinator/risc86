@@ -1392,6 +1392,12 @@ void runThisCPU()
 						continue;
 					}
 				} else if (inst == 0x00100073u) {
+					if (hart->regs[10] == 3) {
+						uint8_t ch;
+						if (virtRead(hart, getReg(hart, 11), &ch))
+							putchar(ch);
+						break;
+					}
 					panic("ebreak");
 				} else if ((inst & 0b1111111'00000'00000'111'11111'1111111) == 0b0001001'00000'00000'000'00000'1110011) {
 					//printf("Doing some fencing\n");
