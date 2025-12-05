@@ -100,8 +100,11 @@ bool fetchInstruction(HartState *hart, uint16_t *inst, uint64_t addr)
 template <typename T> __attribute__((warn_unused_result))
 bool virtRead(HartState *hart, uint64_t addr, T *value)
 {
-	if (addr & (sizeof(T) - 1))
-		panic("Unaligned read");
+	if (addr & (sizeof(T) - 1)) {
+		printf("Unaligned read\n");
+		handleInterrupt(hart, HartState::SCAUSE_LOAD_MISALIGN, addr);
+		return false;
+	}
 
 	auto res = mmu_translate(hart, addr, AccessType::Read);
 	if (!res.pageoff_mask) {
@@ -117,8 +120,17 @@ bool virtRead(HartState *hart, uint64_t addr, T *value)
 template <typename T> __attribute__((warn_unused_result))
 bool virtWrite(HartState *hart, uint64_t addr, T value)
 {
-	if (addr & (sizeof(T) - 1))
-		panic("Unaligned read");
+	if (addr & (sizeof(T) - 1)) {
+		if (!hart->satp) {
+			// The kernel has unaligned relocs and writes to them
+			// directly with misaligned writes. Faulting here
+			// results in an endless loop.
+		} else {
+			printf("Unaligned write\n");
+			handleInterrupt(hart, HartState::SCAUSE_STORE_MISALIGN, addr);
+			return false;
+		}
+	}
 
 	auto res = mmu_translate(hart, addr, AccessType::Write);
 	if (!res.pageoff_mask) {
