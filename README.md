@@ -1,7 +1,14 @@
 RISC86 - RISC-V System Emulator in x86 Kernel Space
 ===
 
+<img width="256" height="256" alt="logo" src="https://github.com/user-attachments/assets/8c1ed44f-58fe-4b55-8a55-6b4318af491b" />
+
 RISC86 is an EFI executable that provides an environment for running RISC-V operating systems on x86 hardware.
+
+State
+--
+
+As of now, it can boot mainline kernels and run generic userspace (without F/D instructions), but it's quite slow as acceleration using the x86 MMU and JITing of code is not implemented yet.
 
 Why
 ---
