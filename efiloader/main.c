@@ -252,6 +252,34 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	if (EFI_ERROR(Status))
 		return Status;
 
+	// Get GOP frame buffer
+	EFI_GRAPHICS_OUTPUT_PROTOCOL* gop = nullptr;
+	EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
+
+	Status = ST->BootServices->LocateProtocol(&gop_guid, NULL, (void**)&gop);
+	if (EFI_ERROR(Status)) {
+		ST->ConOut->OutputString(ST->ConOut, L"No GOP frame buffer available\r\n");
+		return Status;
+	}
+
+	switch (gop->Mode->Info->PixelFormat)
+	{
+		case PixelBlueGreenRedReserved8BitPerColor:
+			params.fb.bpp = 32;
+			break;
+		case PixelRedGreenBlueReserved8BitPerColor:
+			params.fb.bpp = 32;
+			break;
+		default:
+			ST->ConOut->OutputString(ST->ConOut, L"GOP format is unsupported\r\n");
+			return EFI_UNSUPPORTED;
+	}
+
+	params.fb.phys = gop->Mode->FrameBufferBase;
+	params.fb.height = gop->Mode->Info->VerticalResolution;
+	params.fb.width = gop->Mode->Info->HorizontalResolution;
+	params.fb.pitch = gop->Mode->Info->PixelsPerScanLine * (params.fb.bpp / 8);
+
 	// Load kernel and initrd
 	Status = loadKernelAndInitrd(ImageHandle);
 	if (EFI_ERROR(Status)) {
@@ -303,7 +331,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
 	// Get the end of physical memory
 	UINTN entry_count = MemoryMapSize / DescriptorSize;
-	UINTN phys_addr_max = 0;
+	UINTN phys_addr_max = params.fb.phys;
 	for(UINTN i = 0; i < entry_count; ++i) {
 		EFI_MEMORY_DESCRIPTOR *map_entry = (EFI_MEMORY_DESCRIPTOR*) ((UINTN)MemoryMap + i * DescriptorSize);
 		UINTN entry_phys_end = map_entry->PhysicalStart + map_entry->NumberOfPages * PAGE_SIZE;
@@ -366,34 +394,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		params.memory_regions[params.memory_region_count].type = type;
 		params.memory_region_count++;
 	}
-
-	// Get GOP frame buffer
-	EFI_GRAPHICS_OUTPUT_PROTOCOL* gop = nullptr;
-	EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
-
-	Status = ST->BootServices->LocateProtocol(&gop_guid, NULL, (void**)&gop);
-	if (EFI_ERROR(Status)) {
-		ST->ConOut->OutputString(ST->ConOut, L"No GOP frame buffer available\r\n");
-		return Status;
-	}
-
-	switch (gop->Mode->Info->PixelFormat)
-	{
-		case PixelBlueGreenRedReserved8BitPerColor:
-			params.fb.bpp = 32;
-			break;
-		case PixelRedGreenBlueReserved8BitPerColor:
-			params.fb.bpp = 32;
-			break;
-		default:
-			ST->ConOut->OutputString(ST->ConOut, L"GOP format is unsupported\r\n");
-			return EFI_UNSUPPORTED;
-	}
-
-	params.fb.phys = gop->Mode->FrameBufferBase;
-	params.fb.height = gop->Mode->Info->VerticalResolution;
-	params.fb.width = gop->Mode->Info->HorizontalResolution;
-	params.fb.pitch = gop->Mode->Info->PixelsPerScanLine * (params.fb.bpp / 8);
 
 	// Exit boot services
 	Status = SystemTable->BootServices->ExitBootServices(ImageHandle, MapKey);
