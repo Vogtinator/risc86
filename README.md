@@ -38,6 +38,7 @@ make DESTDIR="$PWD/../prefix" install -j8
 Then meson can be used as usual for building:
 
 ```
+meson setup --native-file clang.txt build
 meson compile -C build
 ```
 
