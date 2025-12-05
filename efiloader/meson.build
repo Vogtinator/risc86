@@ -61,12 +61,12 @@ touch "$1"
 qemu = find_program('qemu-system-x86_64')
 qemu_args = [
     '-accel', 'kvm',
-    '-m', '1G',
+    '-cpu', 'host',
+    '-m', '4G',
     '-chardev', 'stdio,mux=on,id=out',
     '-serial', 'chardev:out',
     '-device', 'isa-debugcon,chardev=out',
     '-monitor', 'none',
-    '-nographic',
     '-no-reboot',
     '-bios', '/usr/share/qemu/ovmf-x86_64.bin',
     '-drive', 'file=fat:' + qemu_esp_dir + ',readonly=on,if=virtio',
