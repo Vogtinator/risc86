@@ -2,6 +2,7 @@
 #include <libfdt.h>
 
 #include "devicetree.h"
+#include "loaderapi.h"
 
 extern KernelParams kernel_params;
 
@@ -24,7 +25,7 @@ PhysAddr buildDeviceTreeBlob()
 
 	// Chosen node
 	const int chosen_ofs = fdt_add_subnode(dt_virt, root_ofs, "chosen");
-	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "debug loglevel=9 earlycon=sbi console=hvc0 security=selinux systemd.log_level=debug systemd.log_target=console");
+	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "debug loglevel=9 earlycon=smh security=selinux systemd.log_level=debug systemd.log_target=console");
 
 	if (kernel_params.initrd_len) {
 		fdt_setprop_u64(dt_virt, chosen_ofs, "linux,initrd-start", kernel_params.initrd_phys);
@@ -56,6 +57,19 @@ PhysAddr buildDeviceTreeBlob()
 		fdt_setprop_u32(dt_virt, cpu_intc_ofs, "#interrupt-cells", 1);
 		fdt_setprop_string(dt_virt, cpu_intc_ofs, "compatible", "riscv,cpu-intc");
 		fdt_setprop_empty(dt_virt, cpu_intc_ofs, "interrupt-controller");
+	}
+
+	if (kernel_params.fb.phys) {
+		printf("Have framebuffer at %p\n", (void*)kernel_params.fb.phys);
+		int fb_ofs = fdt_add_subnode(dt_virt, root_ofs, "fb");
+		fdt_setprop_string(dt_virt, fb_ofs, "status", "okay");
+		fdt_setprop_string(dt_virt, fb_ofs, "compatible", "simple-framebuffer");
+		fdt_appendprop_u64(dt_virt, fb_ofs, "reg", kernel_params.fb.phys);
+		fdt_appendprop_u64(dt_virt, fb_ofs, "reg", kernel_params.fb.pitch * kernel_params.fb.height);
+		fdt_setprop_u32(dt_virt, fb_ofs, "width", kernel_params.fb.width);
+		fdt_setprop_u32(dt_virt, fb_ofs, "height", kernel_params.fb.height);
+		fdt_setprop_u32(dt_virt, fb_ofs, "stride", kernel_params.fb.pitch);
+		fdt_setprop_string(dt_virt, fb_ofs, "format", "x8r8g8b8");
 	}
 
 	// Mark all remainig free memory as used by the guest
