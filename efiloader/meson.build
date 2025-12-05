@@ -1,4 +1,4 @@
-efi_c_flags_arch = ['-target', 'x86_64-unknown-windows', '-mno-red-zone', '-fshort-wchar']
+efi_c_flags_arch = ['-target', 'x86_64-unknown-windows', '-mno-red-zone', '-fshort-wchar', '-mgeneral-regs-only']
 efi_c_flags = efi_c_flags_arch + ['-Wall', '-Wextra', '-ffreestanding']
 efi_link_flags = [
     '-target', 'x86_64-unknown-windows',

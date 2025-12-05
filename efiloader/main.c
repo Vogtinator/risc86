@@ -406,6 +406,14 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	if (EFI_ERROR(Status))
 		return Status;
 
+	// Enable some CPU features
+	uint64_t cr4;
+	__asm volatile("mov %%cr4, %[cr4]\n" : [cr4] "=r" (cr4));
+	cr4 |= (1 << 9); // Enable OSFXSR for XMM
+	// Disabled for now, would require AVX+ which is not needed:
+	// cr4 |= (1 << 18); // Enable OSXSAVE for YMM/ZMM
+	__asm volatile("mov %[cr4], %%cr4\n" :: [cr4] "r" (cr4));
+
 	// Enable paging
 	__asm volatile("mov %[pml4], %%cr3\n" :: [pml4] "r" (pml4));
 
