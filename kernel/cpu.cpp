@@ -214,6 +214,13 @@ static inline void setDReg(HartState *hart, int r, double value)
 	hart->fregs[r].d = value;
 }
 
+static inline void setFReg(HartState *hart, int r, float value)
+{
+	setFSDirty(hart);
+	hart->fregs[r].f = value;
+	hart->fregs[r].u.high = ~0u;
+}
+
 static uint64_t getCSR(HartState *hart, uint16_t csr)
 {
 	// TODO: Permission checks
@@ -531,6 +538,19 @@ void runThisCPU()
 
 				if (!virtWrite(hart, getReg(hart, 2) + off, getReg(hart, rs2)))
 					continue;
+			} else if ((inst & 0b111'000000'00000'11) == 0b101'000000'00000'10) { // c.fsdsp
+				if (faultOnFSOff(hart, inst))
+					continue;
+
+				uint16_t imm53 = (inst >> 10) & 7,
+						 imm86 = (inst >>  7) & 7;
+
+				uint16_t off = (imm86 << 6) | (imm53 << 3);
+
+				uint32_t rs2 = (inst >> 2) & 31;
+
+				if (!virtWrite(hart, getReg(hart, 2) + off, getDReg(hart, rs2)))
+					continue;
 			} else if ((inst & 0b111'000000'00000'11) == 0b110'000000'00000'10) { // c.swsp
 				uint16_t imm52 = (inst >>  9) & 0xF,
 						 imm76 = (inst >>  7) & 3;
@@ -558,6 +578,26 @@ void runThisCPU()
 					continue;
 
 				setReg(hart, rd, value);
+			} else if ((inst & 0b111'0'00000'00000'11) == 0b001'0'00000'00000'10) { // c.fldsp
+				if (faultOnFSOff(hart, inst))
+					continue;
+
+				uint16_t imm5  = (inst >> 12) & 1,
+						 imm43 = (inst >>  5) & 3,
+						 imm86 = (inst >>  2) & 7;
+
+				uint16_t off = (imm86 << 6) | (imm5 << 5) | (imm43 << 3);
+
+				uint32_t rd = (inst >> 7) & 31;
+
+				if (rd == 0)
+					panic("Reserved instruction");
+
+				double value;
+				if (!virtRead(hart, getReg(hart, 2) + off, &value))
+					continue;
+
+				setDReg(hart, rd, value);
 			} else if ((inst & 0b111'0'00000'00000'11) == 0b010'0'00000'00000'10) { // c.lwsp
 				uint16_t imm5  = (inst >> 12) & 1,
 						 imm42 = (inst >>  4) & 7,
@@ -741,6 +781,17 @@ void runThisCPU()
 			uint64_t addr = getReg(hart, rs1) + imm;
 			switch (funct3)
 			{
+			case 0b010: { // flw
+				if (faultOnFSOff(hart, inst))
+					continue;
+
+				float val;
+				if (!virtRead(hart, addr, &val))
+					continue;
+
+				setFReg(hart, rd, val);
+				break;
+			}
 			case 0b011: { // fld
 				if (faultOnFSOff(hart, inst))
 					continue;
