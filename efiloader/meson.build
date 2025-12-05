@@ -20,9 +20,18 @@ kernel_bin = custom_target(
 )
 efi_c_flags += ['-DKERNEL_BIN_PATH="' + kernel_bin.full_path() + '"']
 
+# Convert the logo PNG to BGRA
+magick = find_program('magick')
+logo_bin = custom_target(
+    input: files('../logo/logo.png'),
+    output: 'logo.bgra',
+    command: [magick, '@INPUT@', '-scale', '512x512', '@OUTPUT@'],
+)
+efi_c_flags += ['-DLOGO_BIN_PATH="' + logo_bin.full_path() + '"', '-DLOGO_SIZE=512']
+
 risc86_efi = executable(
     'risc86.efi',
-    sources: ['main.c', kernel_bin],
+    sources: ['main.c', kernel_bin, logo_bin],
     include_directories: gnu_efi.get_variable('includedir') + '/efi',
     c_args: efi_c_flags,
     link_args: efi_link_flags,
