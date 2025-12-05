@@ -84,7 +84,13 @@ bool fetchInstruction(HartState *hart, uint16_t *inst, uint64_t addr)
 	if (addr & (sizeof(uint16_t) - 1))
 		panic("Unaligned instruction fetch");
 
-	// TODO: iTLB, resp. use native load with trap
+	// Hacky iTLB: Remember the last translated page
+	static uint64_t last_virt = 0, last_phys = 0, last_satp = 0;
+	if (last_satp == hart->satp && last_virt == (addr & ~0xFFFul)) {
+		*inst = *phys_to_virt<uint16_t>(last_phys + (addr & 0xFFFul));
+		return true;
+	}
+
 	auto res = mmu_translate(hart, addr, AccessType::Exec);
 	if (!res.pageoff_mask) {
 		handleInterrupt(hart, HartState::SCAUSE_INSTR_PAGE_FAULT, addr);
@@ -92,6 +98,9 @@ bool fetchInstruction(HartState *hart, uint16_t *inst, uint64_t addr)
 	}
 
 	PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
+	last_virt = addr & ~0xFFFul;
+	last_phys = phys & ~0xFFFul;
+	last_satp = hart->satp;
 	*inst = *phys_to_virt<uint16_t>(phys);
 	return true;
 }
