@@ -47,7 +47,7 @@ PhysAddr buildDeviceTreeBlob()
 		fdt_setprop_string(dt_virt, cpu_ofs, "status", "okay");
 		fdt_setprop_string(dt_virt, cpu_ofs, "compatible", "riscv");
 		fdt_setprop_string(dt_virt, cpu_ofs, "riscv,isa-base", "rv64i");
-		for (const char *ext : (const char*[]){"i", "m", "a", "c", "svade", "sstc", "zicsr", "zifencei"})
+		for (const char *ext : (const char*[]){"i", "m", "a", "f", "d", "c", "svade", "sstc", "zicsr", "zifencei"})
 			fdt_appendprop_string(dt_virt, cpu_ofs, "riscv,isa-extensions", ext);
 
 		fdt_setprop_string(dt_virt, cpu_ofs, "mmu-type", "riscv,sv39");

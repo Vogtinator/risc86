@@ -186,10 +186,40 @@ static inline void setReg(HartState *hart, int r, uint64_t value)
 		hart->regs[r] = value;
 }
 
+static inline bool faultOnFSOff(HartState *hart, uint32_t inst)
+{
+	if (hart->sstatus & SSTATUS_FS_MASK)
+		return false; // Turned on
+
+	handleInterrupt(hart, HartState::SCAUSE_ILLEGAL_INSTRUCTION, inst);
+	return true;
+}
+
+static inline void setFSDirty(HartState *hart)
+{
+	hart->sstatus |= SSTATUS_FS_MASK;
+}
+
+static inline double getDReg(HartState *hart, int r)
+{
+	if ((hart->sstatus & SSTATUS_FS_MASK) == 0)
+		panic("getDReg called with FS off!");
+
+	return hart->fregs[r].d;
+}
+
+static inline void setDReg(HartState *hart, int r, double value)
+{
+	setFSDirty(hart);
+	hart->fregs[r].d = value;
+}
+
 static uint64_t getCSR(HartState *hart, uint16_t csr)
 {
 	// TODO: Permission checks
 	switch (csr) {
+	case 0x003u:
+		return hart->fcsr;
 	case 0x100u:
 		return hart->sstatus;
 	case 0x104u:
@@ -217,6 +247,9 @@ static void setCSR(HartState *hart, uint16_t csr, uint64_t value)
 {
 	// TODO: Permission checks
 	switch (csr) {
+	case 0x003u:
+		hart->fcsr = value;
+		return;
 	case 0x100u:
 		hart->sstatus = value;
 		return;
@@ -392,6 +425,23 @@ void runThisCPU()
 					continue;
 
 				setReg(hart, rd, value);
+			} else if ((inst & 0b111'000'000'00'000'11) == 0b001'000'000'00'000'00) { // c.fld
+				if (faultOnFSOff(hart, inst))
+					continue;
+
+				uint16_t imm53 = (inst >> 10) & 7,
+						 imm76 = (inst >>  5) & 3;
+
+				uint16_t off = (imm76 << 6) | (imm53 << 3);
+
+				uint32_t rs1 = ((inst >> 7) & 7) + 8,
+						 rd  = ((inst >> 2) & 7) + 8;
+
+				double value;
+				if (!virtRead(hart, getReg(hart, rs1) + off, &value))
+					continue;
+
+				setDReg(hart, rd, value);
 			} else if ((inst & 0b111'000'000'00'000'11) == 0b010'000'000'00'000'00) { // c.lw
 				uint16_t imm53 = (inst >> 10) & 7,
 						 imm2  = (inst >>  6) & 1,
@@ -429,6 +479,20 @@ void runThisCPU()
 						 rs2 = ((inst >> 2) & 7) + 8;
 
 				if (!virtWrite<uint64_t>(hart, getReg(hart, rs1) + off, getReg(hart, rs2)))
+					continue;
+			} else if ((inst & 0b111'000'000'00'000'11) == 0b101'000'000'00'000'00) { // c.fsd
+				if (faultOnFSOff(hart, inst))
+					continue;
+
+				uint16_t imm53 = (inst >> 10) & 7,
+						 imm76 = (inst >>  5) & 3;
+
+				uint16_t off = (imm76 << 6) | (imm53 << 3);
+
+				uint32_t rs1 = ((inst >> 7) & 7) + 8,
+						 rs2 = ((inst >> 2) & 7) + 8;
+
+				if (!virtWrite<double>(hart, getReg(hart, rs1) + off, getDReg(hart, rs2)))
 					continue;
 			} else if ((inst & 0b111'1'00000'11111'11) == 0b100'0'00000'00000'10) { // c.jr (before c.mv)
 				uint32_t rs1 = (inst >> 7) & 0x1F;
@@ -667,6 +731,32 @@ void runThisCPU()
 			}
 			break;
 		}
+		case 0x07u: // FP load
+		{
+			uint32_t funct3 = (inst >> 12u) & 7u;
+			uint32_t rd = (inst >> 7u) & 31u;
+			uint32_t rs1 = (inst >> 15u) & 31u;
+			int32_t imm = int32_t(inst) >> 20u;
+
+			uint64_t addr = getReg(hart, rs1) + imm;
+			switch (funct3)
+			{
+			case 0b011: { // fld
+				if (faultOnFSOff(hart, inst))
+					continue;
+
+				double val;
+				if (!virtRead(hart, addr, &val))
+					continue;
+
+				setDReg(hart, rd, val);
+				break;
+			}
+			default:
+				panic("Unknown FP load instruction");
+			}
+			break;
+		}
 		case 0x13u: // integer immediate
 		{
 			uint32_t funct3 = (inst >> 12u) & 7u;
@@ -781,6 +871,30 @@ void runThisCPU()
 				break;
 			default:
 				panic("Unknown store");
+			}
+			break;
+		}
+		case 0x27u: // FP store
+		{
+			uint32_t funct3 = (inst >> 12u) & 7u;
+			uint32_t rs1 = (inst >> 15u) & 31u;
+			uint32_t rs2 = (inst >> 20u) & 31u;
+			int32_t imm = ((int32_t(inst) >> 25u) << 5u) | ((inst >> 7u) & 0x1Fu);
+
+			uint64_t addr = getReg(hart, rs1) + imm;
+
+			switch (funct3)
+			{
+			case 0b011: { // fsd
+				if (faultOnFSOff(hart, inst))
+					continue;
+
+				if (!virtWrite(hart, addr, getDReg(hart, rs2)))
+					continue;
+				break;
+			}
+			default:
+				panic("Unknown FP load instruction");
 			}
 			break;
 		}
