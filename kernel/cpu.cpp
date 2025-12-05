@@ -1334,6 +1334,13 @@ void runThisCPU()
 			}
 			break;
 		}
+		case 0x53u: // FP
+		{
+			if (faultOnFSOff(hart, inst))
+				continue;
+
+			break;
+		}
 		case 0x63u: // branch
 		{
 			uint32_t funct3 = (inst >> 12u) & 7u;
