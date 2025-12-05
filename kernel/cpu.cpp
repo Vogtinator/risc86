@@ -1322,6 +1322,9 @@ void runThisCPU()
 					handleSRET(hart);
 					handlePendingInterrupts(hart);
 					continue;
+				} else if (inst == 0x10500073) {
+					asm ("hlt");
+					continue;
 				} else
 					panic("Unsupported misc instruction");
 
