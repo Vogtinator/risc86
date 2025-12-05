@@ -62,6 +62,8 @@ static void handlePendingInterrupts(HartState *hart)
 {
 	if (global_time >= hart->stimecmp)
 		hart->sip |= SIP_STIP;
+	else
+		hart->sip &= ~SIP_STIP;
 
 	if((hart->sstatus & SSTATUS_SIE) || hart->mode == HartState::MODE_USER)
 	{
@@ -1179,6 +1181,7 @@ void runThisCPU()
 					//printf("Doing some fencing\n");
 				} else if (inst == 0x10200073) {
 					handleSRET(hart);
+					handlePendingInterrupts(hart);
 					continue;
 				} else
 					panic("Unsupported misc instruction");
@@ -1263,6 +1266,7 @@ void runThisCPU()
 
 			// Immediately check for interrupts
 			hart->pc += 4;
+			handlePendingInterrupts(hart);
 			continue;
 		}
 		default:
