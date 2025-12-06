@@ -214,6 +214,14 @@ static inline void setDReg(HartState *hart, int r, double value)
 	hart->fregs[r].d = value;
 }
 
+static inline float getFReg(HartState *hart, int r)
+{
+	if ((hart->sstatus & SSTATUS_FS_MASK) == 0)
+		panic("getFReg called with FS off!");
+
+	return hart->fregs[r].f;
+}
+
 static inline void setFReg(HartState *hart, int r, float value)
 {
 	setFSDirty(hart);
@@ -804,7 +812,7 @@ void runThisCPU()
 				break;
 			}
 			default:
-				panic("Unknown FP load instruction");
+				panic("Unknown FP load instruction %x", inst);
 			}
 			break;
 		}
@@ -936,6 +944,14 @@ void runThisCPU()
 
 			switch (funct3)
 			{
+			case 0b010: { // fsw
+				if (faultOnFSOff(hart, inst))
+					continue;
+
+				if (!virtWrite(hart, addr, getFReg(hart, rs2)))
+					continue;
+				break;
+			}
 			case 0b011: { // fsd
 				if (faultOnFSOff(hart, inst))
 					continue;
@@ -945,7 +961,7 @@ void runThisCPU()
 				break;
 			}
 			default:
-				panic("Unknown FP load instruction");
+				panic("Unknown FP store instruction %x", inst);
 			}
 			break;
 		}
