@@ -112,6 +112,7 @@ bool fetchInstruction(HartState *hart, uint16_t *inst, uint64_t addr)
 	PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
 	last_virt = addr & ~0xFFFul;
 	last_phys = phys & ~0xFFFul;
+	last_satp = hart->satp;
 	*inst = *phys_to_virt<uint16_t>(phys);
 	return true;
 }
