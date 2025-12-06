@@ -8,6 +8,18 @@
 
 extern KernelParams kernel_params;
 
+static struct {
+	volatile uint64_t cpu_begin, cpu_end;
+	volatile uint64_t all_mmu, mmu_cached;
+	volatile uint64_t ifetch, ifetch_cached, load, store;
+} perf;
+
+static uint64_t rdtsc() {
+	uint32_t low, high;
+	asm volatile("rdtsc" : "=a" (low), "=d" (high));
+	return (uint64_t(high) << 32) | low;
+}
+
 static void handleInterrupt(HartState *hart, uint64_t cause, uint64_t stval)
 {
 	hart->scause = cause;
@@ -312,8 +324,12 @@ void runThisCPU()
 {
 	HartState *hart = &getPerCPU()->hart;
 
+	perf.cpu_begin = rdtsc();
+
 	for(;;)
 	{
+		perf.cpu_end = rdtsc();
+
 		static uint32_t counter = 0;
 		if ((counter++ % 1024) == 0) {
 			global_time += 16;
