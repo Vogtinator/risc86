@@ -266,19 +266,12 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		return Status;
 	}
 
-	switch (gop->Mode->Info->PixelFormat)
-	{
-		case PixelBlueGreenRedReserved8BitPerColor:
-			params.fb.bpp = 32;
-			break;
-		case PixelRedGreenBlueReserved8BitPerColor:
-			params.fb.bpp = 32;
-			break;
-		default:
-			ST->ConOut->OutputString(ST->ConOut, L"GOP format is unsupported\r\n");
-			return EFI_UNSUPPORTED;
+	if (gop->Mode->Info->PixelFormat != PixelBlueGreenRedReserved8BitPerColor) {
+		ST->ConOut->OutputString(ST->ConOut, L"GOP format is unsupported\r\n");
+		return EFI_UNSUPPORTED;
 	}
 
+	params.fb.bpp = 32;
 	params.fb.phys = gop->Mode->FrameBufferBase;
 	params.fb.height = gop->Mode->Info->VerticalResolution;
 	params.fb.width = gop->Mode->Info->HorizontalResolution;
