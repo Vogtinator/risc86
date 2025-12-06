@@ -25,7 +25,11 @@ PhysAddr buildDeviceTreeBlob()
 
 	// Chosen node
 	const int chosen_ofs = fdt_add_subnode(dt_virt, root_ofs, "chosen");
-	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "debug loglevel=9 earlycon=smh security=selinux systemd.log_level=debug systemd.log_target=console");
+	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "debug loglevel=9 earlycon=smh console=tty security=selinux systemd.log_level=debug systemd.log_target=console linuxrc.log=/dev/console linuxrc.debug=1 systemd.log_level=debug");
+	// TODO: Fill that randomly (using rdrand/rdseed?)
+	for(uint32_t i : (uint32_t[]){0xe3c3d5c1u, 0x67270453u, 0x27a09781u, 0xa54ed241u,
+	                              0x66d189d4u, 0x24efaf2fu, 0xf887c4d7u, 0xec6a7c2bu})
+		fdt_appendprop_u32(dt_virt, chosen_ofs, "rng-seed", i);
 
 	if (kernel_params.initrd_len) {
 		fdt_setprop_u64(dt_virt, chosen_ofs, "linux,initrd-start", kernel_params.initrd_phys);
