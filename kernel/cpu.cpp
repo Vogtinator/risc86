@@ -308,7 +308,7 @@ void runThisCPU()
 	{
 		static uint32_t counter = 0;
 		if ((counter++ % 1024) == 0) {
-			global_time++;
+			global_time += 16;
 			handlePendingInterrupts(hart);
 		}
 
