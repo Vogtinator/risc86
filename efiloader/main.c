@@ -277,10 +277,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	params.fb.width = gop->Mode->Info->HorizontalResolution;
 	params.fb.pitch = gop->Mode->Info->PixelsPerScanLine * (params.fb.bpp / 8);
 
-	const int x = (params.fb.width - LOGO_SIZE) / 2, y = (params.fb.height - LOGO_SIZE) / 2;
-	for (int line = 0; line < LOGO_SIZE; line++) {
-		memcpy((void*) (params.fb.phys + (y + line) * params.fb.pitch + x * 4),
-			   (void*) (&logo[line * LOGO_SIZE * 4]), LOGO_SIZE * 4);
+	// Blit logo to the center
+	if (params.fb.width >= LOGO_SIZE && params.fb.height >= LOGO_SIZE) {
+		const int x = (params.fb.width - LOGO_SIZE) / 2, y = (params.fb.height - LOGO_SIZE) / 2;
+		for (int line = 0; line < LOGO_SIZE; line++) {
+			memcpy((void*) (params.fb.phys + (y + line) * params.fb.pitch + x * 4),
+			       (void*) (&logo[line * LOGO_SIZE * 4]), LOGO_SIZE * 4);
+		}
 	}
 
 	// Load kernel and initrd
