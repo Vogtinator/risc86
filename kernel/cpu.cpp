@@ -1407,11 +1407,13 @@ void runThisCPU()
 						handleInterrupt(hart, HartState::SCAUSE_ECALL_UMODE, 0);
 						continue;
 					}
-				} else if (inst == 0x00100073u) {
-					if (hart->regs[10] == 3) {
+				} else if (inst == 0x00100073u) { // ebreak
+					if (hart->regs[10] == 3) { // semihosting putc
 						uint8_t ch;
 						if (virtRead(hart, getReg(hart, 11), &ch))
 							putchar(ch);
+						else
+							panic("Fault during semihost putc");
 						break;
 					}
 					panic("ebreak");
