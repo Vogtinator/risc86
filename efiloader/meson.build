@@ -18,7 +18,6 @@ kernel_bin = custom_target(
     output: 'kernel.bin',
     command: [objcopy, '-O', 'binary', '@INPUT@', '@OUTPUT@'],
 )
-efi_c_flags += ['-DKERNEL_BIN_PATH="' + kernel_bin.full_path() + '"']
 
 # Convert the logo PNG to BGRA
 magick = find_program('magick')
@@ -27,7 +26,12 @@ logo_bin = custom_target(
     output: 'logo.bgra',
     command: [magick, '@INPUT@', '-scale', '512x512', '@OUTPUT@'],
 )
-efi_c_flags += ['-DLOGO_BIN_PATH="' + logo_bin.full_path() + '"', '-DLOGO_SIZE=512']
+efi_c_flags += ['-DLOGO_SIZE=512']
+
+# Workaround ninja behaviour: The path in the depfile must be identical
+# to the ninja target name, i.e. efiloader/kernel.bin, so need to use
+# a relative path here as well.
+efi_c_flags += ['--embed-dir=efiloader']
 
 risc86_efi = executable(
     'risc86.efi',

@@ -8,11 +8,11 @@
 
 // Embedded raw kernel binary to load
 alignas(PAGE_SIZE) static const UINT8 kernel[] = {
-#embed KERNEL_BIN_PATH
+#embed "kernel.bin"
 };
 
 static const UINT8 logo[] = {
-#embed LOGO_BIN_PATH
+#embed "logo.bgra"
 };
 
 static struct KernelParams params = { 0 };
