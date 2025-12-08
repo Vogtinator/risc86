@@ -3,7 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "cpu.h"
+#include "hart.h"
 #include "percpu.h"
 #include "utils.h"
 
@@ -23,7 +23,7 @@ void panic(const char *fmt, ...)
 		va_end(va);
 
 		fprintf(stderr, "\nVirtual CPU state: \n");
-		dumpCPUState(&getPerCPU()->hart);
+		getPerCPU()->hart.dump();
 		fflush(stdout);
 		fprintf(stderr, "\n");
 	} else if (in_panic == 2) {

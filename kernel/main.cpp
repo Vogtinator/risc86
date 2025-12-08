@@ -3,10 +3,10 @@
 #include <unistd.h>
 #include <stdlib.h>
 
-#include "cpu.h"
 #include "devicetree.h"
-#include "mem.h"
+#include "hart.h"
 #include "loaderapi.h"
+#include "mem.h"
 #include "percpu.h"
 #include "utils.h"
 
@@ -53,12 +53,12 @@ void kernel_entry(KernelParams *params)
 
 	// Set up hart 0 to jump to the kernel
 	auto *hart0 = &getPerCPU()->hart;
-	hart0->mode = HartState::MODE_SUPERVISOR;
+	hart0->mode = Hart::MODE_SUPERVISOR;
 	hart0->regs[10] = 0; // a0 = Hart ID
 	hart0->regs[11] = dtb; // a1 = phys addr of DT
 	hart0->pc = params->kernel_phys;
 
-	runThisCPU();
+	hart0->run();
 
 	panic("Kernel exited");
 

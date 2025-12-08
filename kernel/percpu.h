@@ -8,7 +8,7 @@
 // The PerCpuState for a CPU can always be accessed
 // by calling getPerCPU() on that CPU.
 struct PerCpuState {
-	struct HartState hart;
+	struct Hart hart;
 	unsigned int cpu_id;
 };
 

@@ -2,4 +2,4 @@
 
 #include "hart.h"
 
-void handleSBICall(HartState *hart);
+void handleSBICall(Hart *hart);

@@ -12,7 +12,7 @@
 #define PTE_PPN_SHIFT (10)
 #define PTE_PPN_MASK ((1ull << 44) - 1)
 
-TranslationResult mmu_translate(HartState *hart, uint64_t addr, AccessType type)
+TranslationResult mmu_translate(Hart *hart, uint64_t addr, AccessType type)
 {
 	uint32_t mode = hart->satp >> 60;
 
@@ -61,7 +61,7 @@ TranslationResult mmu_translate(HartState *hart, uint64_t addr, AccessType type)
 		}
 
 		// TODO: SUM bit?
-		if (hart->mode == HartState::MODE_USER && !(pte & PTE_U))
+		if (hart->mode == Hart::MODE_USER && !(pte & PTE_U))
 			return fault(); // User mode access denied
 
 		// Check based on access type and AD bits

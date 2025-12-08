@@ -14,4 +14,4 @@ enum class AccessType {
 	Read, Write, Exec
 };
 
-TranslationResult mmu_translate(HartState *hart, uint64_t addr, AccessType type);
+TranslationResult mmu_translate(Hart *hart, uint64_t addr, AccessType type);

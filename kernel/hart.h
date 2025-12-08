@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#include "utils.h"
+
 #define SSTATUS_SIE (1ull << 1)
 #define SSTATUS_SPIE (1ull << 5)
 #define SSTATUS_SPP (1ull << 8)
@@ -9,7 +11,7 @@
 
 #define SIP_STIP (1ull << 5)
 
-struct HartState {
+struct Hart {
 	// regs[0] is always 0, never written to
 	uint64_t regs[32];
 	uint64_t pc;
@@ -53,4 +55,72 @@ struct HartState {
 	uint64_t stval;
 	uint64_t satp;
 	uint64_t stimecmp;
+
+	void handleInterrupt(uint64_t cause, uint64_t stval);
+	void handlePendingInterrupts();
+	void handleSRET();
+
+	// Perform an instruction fetch of 16 bits at the given addr.
+	// Returns false on fault.
+	__attribute__((warn_unused_result))
+	bool fetchInstruction(uint16_t *inst, uint64_t addr);
+
+	template <typename T> __attribute__((warn_unused_result))
+	bool virtRead(uint64_t addr, T *value);
+
+	template <typename T> __attribute__((warn_unused_result))
+	bool virtWrite(uint64_t addr, T value);
+
+	void dump();
+
+	inline void setFSDirty()
+	{
+		this->sstatus |= SSTATUS_FS_MASK;
+	}
+
+	inline uint64_t getReg(int r)
+	{
+		return this->regs[r];
+	}
+
+	inline void setReg(int r, uint64_t value)
+	{
+		if (r != 0)
+			this->regs[r] = value;
+	}
+
+	inline double getDReg(int r)
+	{
+		if ((this->sstatus & SSTATUS_FS_MASK) == 0)
+			panic("getDReg called with FS off!");
+
+		return this->fregs[r].d;
+	}
+
+	inline void setDReg(int r, double value)
+	{
+		setFSDirty();
+		this->fregs[r].d = value;
+	}
+
+	inline float getFReg(int r)
+	{
+		if ((this->sstatus & SSTATUS_FS_MASK) == 0)
+			panic("getFReg called with FS off!");
+
+		return this->fregs[r].f;
+	}
+
+	inline void setFReg(int r, float value)
+	{
+		setFSDirty();
+		this->fregs[r].f = value;
+		this->fregs[r].u.high = ~0u;
+	}
+
+	bool faultOnFSOff(uint32_t inst);
+	uint64_t getCSR(uint16_t csr);
+	void setCSR(uint16_t csr, uint64_t value);
+
+	void run();
 };

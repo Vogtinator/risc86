@@ -20,7 +20,7 @@ enum {
 	SBI_EXT_PMU  = 0x504D55,
 };
 
-static uint64_t sbiCall(HartState *hart, uint64_t *result)
+static uint64_t sbiCall(Hart *hart, uint64_t *result)
 {
 	uint64_t ext = hart->regs[17], func = hart->regs[16];
 	switch (ext)
@@ -87,7 +87,7 @@ static uint64_t sbiCall(HartState *hart, uint64_t *result)
 	return SBI_ERR_NOT_SUPPORTED;
 }
 
-void handleSBICall(HartState *hart)
+void handleSBICall(Hart *hart)
 {
 	uint64_t result = 0;
 	hart->regs[10] = sbiCall(hart, &result);
