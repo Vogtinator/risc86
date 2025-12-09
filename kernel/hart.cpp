@@ -912,9 +912,9 @@ void Hart::runInstruction(uint32_t inst)
 		// ignore aq and rl bits
 		funct7 &= ~3u;
 
-		switch((funct3 << 8u) | funct7)
+		switch((funct7 << 4u) | funct3)
 		{
-		case 0x200u: // amoadd.w
+		case 0x002u: // amoadd.w
 		{
 			uint64_t addr = getReg(rs1);
 			uint32_t val;
@@ -927,7 +927,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, int64_t(int32_t(val)));
 			break;
 		}
-		case 0x204u: // amoswap.w
+		case 0x042u: // amoswap.w
 		{
 			uint64_t addr = getReg(rs1);
 			uint32_t val;
@@ -940,7 +940,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, int64_t(int32_t(val)));
 			break;
 		}
-		case 0x208u: // lr.w
+		case 0x082u: // lr.w
 		{
 			if (rs2 != 0u)
 				panic("lr with non-zero");
@@ -953,7 +953,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, int32_t(val));
 			break;
 		}
-		case 0x20cu: // sc.w
+		case 0x0c2u: // sc.w
 		{
 			uint64_t addr = getReg(rs1);
 			if (!virtWrite<uint32_t>(addr, getReg(rs2)))
@@ -962,7 +962,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, 0u);
 			break;
 		}
-		case 0x300u: // amoadd.d
+		case 0x003u: // amoadd.d
 		{
 			uint64_t addr = getReg(rs1);
 			uint64_t val;
@@ -975,7 +975,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, val);
 			break;
 		}
-		case 0x304u: // amoswap.d
+		case 0x043u: // amoswap.d
 		{
 			// TODO: Is this correct? Several docs disagree...
 			uint64_t addr = getReg(rs1);
@@ -989,7 +989,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, val);
 			break;
 		}
-		case 0x308u: // lr.d
+		case 0x083u: // lr.d
 		{
 			if (rs2 != 0u)
 				panic("lr with non-zero");
@@ -1002,7 +1002,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, val);
 			break;
 		}
-		case 0x30cu: // sc.d
+		case 0x0c3u: // sc.d
 		{
 			uint64_t addr = getReg(rs1);
 			if (!virtWrite<uint64_t>(addr, getReg(rs2)))
@@ -1011,7 +1011,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, 0u);
 			break;
 		}
-		case 0x310u: // amoxor.d
+		case 0x103u: // amoxor.d
 		{
 			uint64_t addr = getReg(rs1);
 			uint64_t val;
@@ -1024,7 +1024,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, val);
 			break;
 		}
-		case 0x220u: // amoor.w
+		case 0x202u: // amoor.w
 		{
 			uint64_t addr = getReg(rs1);
 			uint32_t val;
@@ -1037,7 +1037,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, int64_t(int32_t(val)));
 			break;
 		}
-		case 0x320u: // amoor.d
+		case 0x203u: // amoor.d
 		{
 			uint64_t addr = getReg(rs1);
 			uint64_t val;
@@ -1050,7 +1050,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, val);
 			break;
 		}
-		case 0x230u: // amoand.w
+		case 0x302u: // amoand.w
 		{
 			uint64_t addr = getReg(rs1);
 			uint32_t val;
@@ -1063,7 +1063,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, int64_t(int32_t(val)));
 			break;
 		}
-		case 0x330u: // amoand.d
+		case 0x303u: // amoand.d
 		{
 			uint64_t addr = getReg(rs1);
 			uint64_t val;
@@ -1076,7 +1076,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, val);
 			break;
 		}
-		case 0x270u: // amomaxu.w
+		case 0x702u: // amomaxu.w
 		{
 			uint64_t addr = getReg(rs1);
 			uint32_t val;
@@ -1089,7 +1089,7 @@ void Hart::runInstruction(uint32_t inst)
 			setReg(rd, int64_t(int32_t(val)));
 			break;
 		}
-		case 0x370u: // amomaxu
+		case 0x703u: // amomaxu
 		{
 			uint64_t addr = getReg(rs1);
 			uint64_t val;
@@ -1115,39 +1115,45 @@ void Hart::runInstruction(uint32_t inst)
 		uint32_t rs2 = (inst >> 20u) & 31u;
 		uint32_t funct7 = inst >> 25u;
 
-		switch((funct3 << 8u) | funct7)
+		switch((funct7 << 4u) | funct3)
 		{
 		case 0x000u: // add
 			setReg(rd, getReg(rs1) + getReg(rs2));
 			break;
-		case 0x001u: // mul
-			setReg(rd, getReg(rs1) * getReg(rs2));
-			break;
-		case 0x020u: // sub
-			setReg(rd, getReg(rs1) - getReg(rs2));
-			break;
-		case 0x100u: // sll
+		case 0x001u: // sll
 			setReg(rd, getReg(rs1) << (getReg(rs2) & 63u));
 			break;
-		case 0x101u: // mulh
-			setReg(rd, (__int128_t(int64_t(getReg(rs1))) * __int128_t(int64_t(getReg(rs2)))) >> 64);
-			break;
-		case 0x200u: // slt
+		case 0x002u: // slt
 			setReg(rd, int64_t(getReg(rs1)) < int64_t(getReg(rs2)) ? 1u : 0u);
 			break;
-		case 0x201u: // mulhsu
-			setReg(rd, (__int128_t(int64_t(getReg(rs1))) * __uint128_t(getReg(rs2))) >> 64);
-			break;
-		case 0x300u: // sltu
+		case 0x003u: // sltu
 			setReg(rd, (getReg(rs1) < getReg(rs2)) ? 1u : 0u);
 			break;
-		case 0x301u: // mulhu
-			setReg(rd, (__uint128_t(getReg(rs1)) * __uint128_t(getReg(rs2))) >> 64);
-			break;
-		case 0x400u: // xor
+		case 0x004u: // xor
 			setReg(rd, getReg(rs1) ^ getReg(rs2));
 			break;
-		case 0x401u: // div
+		case 0x005u: // srl
+			setReg(rd, getReg(rs1) >> (getReg(rs2) & 63u));
+			break;
+		case 0x006u: // or
+			setReg(rd, getReg(rs1) | getReg(rs2));
+			break;
+		case 0x007u: // and
+			setReg(rd, getReg(rs1) & getReg(rs2));
+			break;
+		case 0x010u: // mul
+			setReg(rd, getReg(rs1) * getReg(rs2));
+			break;
+		case 0x011u: // mulh
+			setReg(rd, (__int128_t(int64_t(getReg(rs1))) * __int128_t(int64_t(getReg(rs2)))) >> 64);
+			break;
+		case 0x012u: // mulhsu
+			setReg(rd, (__int128_t(int64_t(getReg(rs1))) * __uint128_t(getReg(rs2))) >> 64);
+			break;
+		case 0x013u: // mulhu
+			setReg(rd, (__uint128_t(getReg(rs1)) * __uint128_t(getReg(rs2))) >> 64);
+			break;
+		case 0x014u: // div
 			if (getReg(rs2) == 0)
 				setReg(rd, ~uint64_t(0));
 			else if (int64_t(getReg(rs1)) == INT64_MIN && int64_t(getReg(rs2)) == -1)
@@ -1156,23 +1162,14 @@ void Hart::runInstruction(uint32_t inst)
 				setReg(rd, int64_t(getReg(rs1)) / int64_t(getReg(rs2)));
 
 			break;
-		case 0x500u: // srl
-			setReg(rd, getReg(rs1) >> (getReg(rs2) & 63u));
-			break;
-		case 0x501u: // divu
+		case 0x015u: // divu
 			if (getReg(rs2) == 0)
 				setReg(rd, ~uint64_t(0));
 			else
 				setReg(rd, getReg(rs1) / getReg(rs2));
 
 			break;
-		case 0x520u: // sra
-			setReg(rd, int64_t(getReg(rs1)) >> (getReg(rs2) & 63u));
-			break;
-		case 0x600u: // or
-			setReg(rd, getReg(rs1) | getReg(rs2));
-			break;
-		case 0x601u: // rem
+		case 0x016u: // rem
 			// TODO: Signedness correct?
 			if (getReg(rs2) == 0)
 				setReg(rd, getReg(rs1));
@@ -1181,14 +1178,17 @@ void Hart::runInstruction(uint32_t inst)
 			else
 				setReg(rd, int64_t(getReg(rs1)) % int64_t(getReg(rs2)));
 			break;
-		case 0x700u: // and
-			setReg(rd, getReg(rs1) & getReg(rs2));
-			break;
-		case 0x701u: // remu
+		case 0x017u: // remu
 			if (getReg(rs2) == 0)
 				setReg(rd, getReg(rs1));
 			else
 				setReg(rd, getReg(rs1) % getReg(rs2));
+			break;
+		case 0x200u: // sub
+			setReg(rd, getReg(rs1) - getReg(rs2));
+			break;
+		case 0x205u: // sra
+			setReg(rd, int64_t(getReg(rs1)) >> (getReg(rs2) & 63u));
 			break;
 		default:
 			panic("Unknown reg-reg instruction");
@@ -1209,21 +1209,21 @@ void Hart::runInstruction(uint32_t inst)
 		uint32_t rs2 = (inst >> 20u) & 31u;
 		uint32_t funct7 = inst >> 25u;
 
-		switch((funct3 << 8u) | funct7)
+		switch((funct7 << 4u) | funct3)
 		{
 		case 0x000u: // addw
 			setReg(rd, int64_t(int32_t(getReg(rs1)) + int32_t(getReg(rs2))));
 			break;
-		case 0x001u: // mulw
-			setReg(rd, int64_t(int32_t(getReg(rs1)) * int32_t(getReg(rs2))));
-			break;
-		case 0x020u: // subw
-			setReg(rd, int64_t(int32_t(getReg(rs1)) - int32_t(getReg(rs2))));
-			break;
-		case 0x100u: // sllw
+		case 0x001u: // sllw
 			setReg(rd, int64_t(int32_t(getReg(rs1)) << (getReg(rs2) & 31u)));
 			break;
-		case 0x401u: // divw
+		case 0x005u: // srlw
+			setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1)) >> (getReg(rs2) & 31u))));
+			break;
+		case 0x010u: // mulw
+			setReg(rd, int64_t(int32_t(getReg(rs1)) * int32_t(getReg(rs2))));
+			break;
+		case 0x014u: // divw
 			if (uint32_t(getReg(rs2)) == 0)
 				setReg(rd, ~uint64_t(0));
 			else if (int32_t(getReg(rs1)) == INT32_MIN && int32_t(getReg(rs2)) == -1)
@@ -1231,19 +1231,13 @@ void Hart::runInstruction(uint32_t inst)
 			else
 				setReg(rd, int64_t(int32_t(getReg(rs1)) / int32_t(getReg(rs2))));
 			break;
-		case 0x500u: // srlw
-			setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1)) >> (getReg(rs2) & 31u))));
-			break;
-		case 0x501u: // divuw
+		case 0x015u: // divuw
 			if (uint32_t(getReg(rs2)) == 0)
 				setReg(rd, ~uint64_t(0));
 			else
 				setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1)) / uint32_t(getReg(rs2)))));
 			break;
-		case 0x520u: // sraw
-			setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1))) >> (getReg(rs2) & 31u)));
-			break;
-		case 0x601u: // remw
+		case 0x016u: // remw
 			if (uint32_t(getReg(rs2)) == 0)
 				setReg(rd, int64_t(int32_t(getReg(rs1))));
 			else if (int32_t(getReg(rs1)) == INT32_MIN && int32_t(getReg(rs2)) == -1)
@@ -1251,11 +1245,17 @@ void Hart::runInstruction(uint32_t inst)
 			else
 				setReg(rd, int64_t(int32_t(int32_t(getReg(rs1)) % int32_t(getReg(rs2)))));
 			break;
-		case 0x701u: // remuw
+		case 0x017u: // remuw
 			if (uint32_t(getReg(rs2)) == 0)
 				setReg(rd, int64_t(int32_t(getReg(rs1))));
 			else
 				setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1)) % uint32_t(getReg(rs2)))));
+			break;
+		case 0x200u: // subw
+			setReg(rd, int64_t(int32_t(getReg(rs1)) - int32_t(getReg(rs2))));
+			break;
+		case 0x205u: // sraw
+			setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1))) >> (getReg(rs2) & 31u)));
 			break;
 		default:
 			panic("Unknown 32-bit reg-reg instruction");
