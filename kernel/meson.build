@@ -48,8 +48,8 @@ libfdt = declare_dependency(include_directories: [libfdt_path], link_with: libfd
 kernel = executable(
     'kernel',
     sources: [
-        'cpu.cpp',
         'devicetree.cpp',
+        'hart.cpp',
         'main.cpp',
         'mem.cpp',
         'newlib_stubs.cpp',
