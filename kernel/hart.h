@@ -56,6 +56,10 @@ struct Hart {
 	uint64_t satp;
 	uint64_t stimecmp;
 
+	void dump();
+	void run();
+
+private:
 	// Until there's a real timer
 	static uint64_t global_time;
 
@@ -73,9 +77,6 @@ struct Hart {
 
 	template <typename T> __attribute__((warn_unused_result))
 	bool virtWrite(uint64_t addr, T value);
-
-	void dump();
-	void run();
 
 	inline void setFSDirty()
 	{
