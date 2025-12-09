@@ -56,6 +56,9 @@ struct Hart {
 	uint64_t satp;
 	uint64_t stimecmp;
 
+	// Until there's a real timer
+	static uint64_t global_time;
+
 	void handleInterrupt(uint64_t cause, uint64_t stval);
 	void handlePendingInterrupts();
 	void handleSRET();
@@ -72,6 +75,7 @@ struct Hart {
 	bool virtWrite(uint64_t addr, T value);
 
 	void dump();
+	void run();
 
 	inline void setFSDirty()
 	{
@@ -122,5 +126,6 @@ struct Hart {
 	uint64_t getCSR(uint16_t csr);
 	void setCSR(uint16_t csr, uint64_t value);
 
-	void run();
+	void runRVCInstruction(uint16_t inst);
+	void runInstruction(uint32_t inst);
 };

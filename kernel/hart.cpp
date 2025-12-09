@@ -55,8 +55,7 @@ void Hart::handleSRET()
 	this->pc = this->sepc;
 }
 
-// Hack
-static uint64_t global_time = 0;
+uint64_t Hart::global_time = 0;
 
 void Hart::handlePendingInterrupts()
 {
@@ -74,6 +73,7 @@ void Hart::handlePendingInterrupts()
 			panic("Unknown interrupt pending");
 	}
 }
+
 
 // Perform an instruction fetch of 16 bits at the given addr.
 // Returns false on fault.
@@ -155,10 +155,10 @@ bool Hart::virtWrite(uint64_t addr, T value)
 void Hart::dump()
 {
 	printf("PC: %016lx (vmlinux: %p, offset: %p)\n",
-	    this->pc,
-	    (void*)(this->pc - kernel_params.kernel_phys + 0xffffffff80000000),
-	    (void*)(this->pc - kernel_params.kernel_phys)
-	);
+	       this->pc,
+	       (void*)(this->pc - kernel_params.kernel_phys + 0xffffffff80000000),
+	       (void*)(this->pc - kernel_params.kernel_phys)
+	       );
 
 	// Print general regs
 	for (int i = 0; i < 32;)
@@ -171,10 +171,10 @@ void Hart::dump()
 
 	// Print CSRs
 	struct { uint64_t *ptr; const char *name; } csrs[] = {
-        #define REG(x) { &this->x, # x }
+#define REG(x) { &this->x, # x }
 		REG(sstatus), REG(stvec), REG(sip), REG(sie), REG(sscratch),
 		REG(sepc), REG(scause), REG(stval), REG(satp),
-		#undef REG
+#undef REG
 	};
 
 	for (auto csr : csrs)
@@ -263,1231 +263,1236 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 	}
 }
 
+void Hart::runRVCInstruction(uint16_t inst)
+{
+	if ((inst & 0xE003) == 0xA001) { // c.j
+		// This is atrocious.
+		uint16_t imm11 = (inst >> 12) & 1,
+		        imm4  = (inst >> 11) & 1,
+		        imm98 = (inst >>  9) & 3,
+		        imm10 = (inst >>  8) & 1,
+		        imm6  = (inst >>  7) & 1,
+		        imm7  = (inst >>  6) & 1,
+		        imm31 = (inst >>  3) & 7,
+		        imm5  = (inst >>  2) & 1;
+
+		uint16_t imm = (imm11 << 11) | (imm10 << 10) | (imm98 << 8)
+		               | (imm7 << 7) | (imm6 << 6) | (imm5 << 5)
+		               | (imm4 << 4) | (imm31 << 1);
+
+		const int16_t offs = int16_t(imm << 4) >> 4;
+
+		this->pc += offs;
+		return;
+	} else if ((inst & 0xE003) == 0x4001) { // c.li
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm40 = (inst >> 2) & 0x1F;
+
+		int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
+		uint32_t rd = (inst >> 7) & 0x1F;
+		setReg(rd, uint64_t(imm));
+	} else if ((inst & 0b111'0'00000'00000'11) == 0b000'0'00000'00000'10) { // c.slli
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm40 = (inst >> 2) & 0x1F;
+
+		uint16_t imm = (imm5 << 5) | imm40;
+		uint32_t rd = (inst >> 7) & 0x1F;
+		setReg(rd, getReg(rd) << imm);
+	} else if ((inst & 0xEF83) == 0x6101) { // c.addi16sp (must come before c.lui)
+		uint16_t imm9  = (inst >> 12) & 1,
+		        imm4  = (inst >>  6) & 1,
+		        imm6  = (inst >>  5) & 1,
+		        imm87 = (inst >>  3) & 3,
+		        imm5  = (inst >>  2) & 1;
+
+		uint16_t uimm = (imm9 << 9) | (imm87 << 7) | (imm6 << 6)
+		                | (imm5 << 5) | (imm4 << 4);
+
+		int16_t imm = int16_t(uimm << 6) >> 6;
+		uint32_t rd = 2;
+		setReg(rd, getReg(2) + imm);
+	} else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'01) { // c.lui (after c.addi16sp)
+		uint16_t imm17   = (inst >> 12) & 1,
+		        imm1612 = (inst >>  2) & 0x1F;
+
+		int32_t imm = int32_t(((imm17 << 17) | (imm1612 << 12)) << 14) >> 14;
+		uint32_t rd = (inst >> 7) & 0x1F;
+		setReg(rd, int64_t(imm));
+	} else if (inst == 0) { // Illegal (before c.addi4spn)
+		panic("Illegal 0000 instruction");
+	} else if ((inst & 0b111'00000000'000'11) == 0b000'00000000'000'00) { // c.addi4spn (after illegal)
+		uint16_t imm54 = (inst >> 11) & 3,
+		        imm96 = (inst >>  7) & 0xF,
+		        imm2  = (inst >>  6) & 1,
+		        imm3  = (inst >>  5) & 1;
+
+		uint16_t uimm = (imm96 << 6) | (imm54 << 4) | (imm3 << 3)
+		                | (imm2 << 2);
+
+		uint32_t rd = ((inst >> 2) & 7) + 8;
+		setReg(rd, getReg(2) + uimm);
+	} else if ((inst & 0b111'0'11111'00000'11) == 0b000'0'00000'00000'01) { // c.nop (before c.addi)
+		// nop
+	} else if ((inst & 0b111'0'00000'00000'11) == 0b000'0'00000'00000'01) { // c.addi (after c.nop)
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm40 = (inst >>  2) & 0x1F;
+
+		int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
+		uint32_t rd = (inst >> 7) & 0x1F;
+		setReg(rd, getReg(rd) + imm);
+	} else if ((inst & 0b111'0'00000'00000'11) == 0b001'0'00000'00000'01) { // c.addiw
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm40 = (inst >>  2) & 0x1F;
+
+		int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
+		uint32_t rd = (inst >> 7) & 0x1F;
+		setReg(rd, int64_t(int32_t(getReg(rd) + imm)));
+	} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'00'000'00000'01) { // c.srli
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm40 = (inst >>  2) & 0x1F;
+
+		uint16_t imm = (imm5 << 5) | imm40;
+		uint32_t rd = ((inst >> 7) & 7) + 8;
+		setReg(rd, getReg(rd) >> imm);
+	} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'01'000'00000'01) { // c.srai
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm40 = (inst >>  2) & 0x1F;
+
+		uint16_t imm = (imm5 << 5) | imm40;
+		uint32_t rd = ((inst >> 7) & 7) + 8;
+		setReg(rd, int64_t(getReg(rd)) >> imm);
+	} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'10'000'00000'01) { // c.andi
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm40 = (inst >>  2) & 0x1F;
+
+		int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
+		uint32_t rd = ((inst >> 7) & 7) + 8;
+		setReg(rd, getReg(rd) & uint64_t(imm));
+	} else if ((inst & 0b111'000'000'00'000'11) == 0b011'000'000'00'000'00) { // c.ld
+		uint16_t imm53 = (inst >> 10) & 7,
+		        imm76 = (inst >>  5) & 3;
+
+		uint16_t off = (imm76 << 6) | (imm53 << 3);
+
+		uint32_t rs1 = ((inst >> 7) & 7) + 8,
+		        rd  = ((inst >> 2) & 7) + 8;
+
+		uint64_t value;
+		if (!virtRead<uint64_t>(getReg(rs1) + off, &value))
+			return;
+
+		setReg(rd, value);
+	} else if ((inst & 0b111'000'000'00'000'11) == 0b001'000'000'00'000'00) { // c.fld
+		if (faultOnFSOff(inst))
+			return;
+
+		uint16_t imm53 = (inst >> 10) & 7,
+		        imm76 = (inst >>  5) & 3;
+
+		uint16_t off = (imm76 << 6) | (imm53 << 3);
+
+		uint32_t rs1 = ((inst >> 7) & 7) + 8,
+		        rd  = ((inst >> 2) & 7) + 8;
+
+		double value;
+		if (!virtRead(getReg(rs1) + off, &value))
+			return;
+
+		setDReg(rd, value);
+	} else if ((inst & 0b111'000'000'00'000'11) == 0b010'000'000'00'000'00) { // c.lw
+		uint16_t imm53 = (inst >> 10) & 7,
+		        imm2  = (inst >>  6) & 1,
+		        imm6  = (inst >>  5) & 1;
+
+		uint16_t off = (imm6 << 6) | (imm53 << 3) | (imm2 << 2);
+
+		uint32_t rs1 = ((inst >> 7) & 7) + 8,
+		        rd  = ((inst >> 2) & 7) + 8;
+
+		int32_t value;
+		if (!virtRead<int32_t>(getReg(rs1) + off, &value))
+			return;
+
+		setReg(rd, value);
+	} else if ((inst & 0b111'000'000'00'000'11) == 0b110'000'000'00'000'00) { // c.sw
+		uint16_t imm53 = (inst >> 10) & 7,
+		        imm2  = (inst >>  6) & 1,
+		        imm6  = (inst >>  5) & 1;
+
+		uint16_t off = (imm6 << 6) | (imm53 << 3) | (imm2 << 2);
+
+		uint32_t rs1 = ((inst >> 7) & 7) + 8,
+		        rs2 = ((inst >> 2) & 7) + 8;
+
+		if (!virtWrite<uint32_t>(getReg(rs1) + off, getReg(rs2)))
+			return;
+	} else if ((inst & 0b111'000'000'00'000'11) == 0b111'000'000'00'000'00) { // c.sd
+		uint16_t imm53 = (inst >> 10) & 7,
+		        imm76 = (inst >>  5) & 3;
+
+		uint16_t off = (imm76 << 6) | (imm53 << 3);
+
+		uint32_t rs1 = ((inst >> 7) & 7) + 8,
+		        rs2 = ((inst >> 2) & 7) + 8;
+
+		if (!virtWrite<uint64_t>(getReg(rs1) + off, getReg(rs2)))
+			return;
+	} else if ((inst & 0b111'000'000'00'000'11) == 0b101'000'000'00'000'00) { // c.fsd
+		if (faultOnFSOff(inst))
+			return;
+
+		uint16_t imm53 = (inst >> 10) & 7,
+		        imm76 = (inst >>  5) & 3;
+
+		uint16_t off = (imm76 << 6) | (imm53 << 3);
+
+		uint32_t rs1 = ((inst >> 7) & 7) + 8,
+		        rs2 = ((inst >> 2) & 7) + 8;
+
+		if (!virtWrite<double>(getReg(rs1) + off, getDReg(rs2)))
+			return;
+	} else if ((inst & 0b111'1'00000'11111'11) == 0b100'0'00000'00000'10) { // c.jr (before c.mv)
+		uint32_t rs1 = (inst >> 7) & 0x1F;
+
+		if (rs1 == 0)
+			panic("Reserved c.???");
+
+		this->pc = getReg(rs1);
+		return;
+	} else if ((inst & 0b111'1'00000'00000'11) == 0b100'0'00000'00000'10) { // c.mv (after c.jr)
+		uint32_t rs2 = (inst >> 2) & 0x1F,
+		        rd  = (inst >> 7) & 0x1F;
+
+		setReg(rd, getReg(rs2));
+	} else if ((inst & 0b111'1'11111'11111'11) == 0b100'1'00000'00000'10) { // c.ebreak
+		this->handleInterrupt(Hart::SCAUSE_EBREAK, 0);
+		return;
+	} else if ((inst & 0b111'1'00000'11111'11) == 0b100'1'00000'00000'10) { // c.jalr (after c.ebreak)
+		uint32_t rs1 = (inst >> 7u) & 0x1Fu;
+		uint64_t retaddr = this->pc + 2u;
+		this->pc = getReg(rs1);
+		setReg(1, retaddr);
+		return;
+	} else if ((inst & 0b111'1'00000'00000'11) == 0b100'1'00000'00000'10) { // c.add (after c.jalr)
+		uint32_t rs2 = (inst >> 2) & 0x1F,
+		        rd  = (inst >> 7) & 0x1F;
+
+		setReg(rd, getReg(rd) + getReg(rs2));
+	} else if ((inst & 0b111'000000'00000'11) == 0b111'000000'00000'10) { // c.sdsp
+		uint16_t imm53 = (inst >> 10) & 7,
+		        imm86 = (inst >>  7) & 7;
+
+		uint16_t off = (imm86 << 6) | (imm53 << 3);
+
+		uint32_t rs2 = (inst >> 2) & 31;
+
+		if (!virtWrite(getReg(2) + off, getReg(rs2)))
+			return;
+	} else if ((inst & 0b111'000000'00000'11) == 0b101'000000'00000'10) { // c.fsdsp
+		if (faultOnFSOff(inst))
+			return;
+
+		uint16_t imm53 = (inst >> 10) & 7,
+		        imm86 = (inst >>  7) & 7;
+
+		uint16_t off = (imm86 << 6) | (imm53 << 3);
+
+		uint32_t rs2 = (inst >> 2) & 31;
+
+		if (!virtWrite(getReg(2) + off, getDReg(rs2)))
+			return;
+	} else if ((inst & 0b111'000000'00000'11) == 0b110'000000'00000'10) { // c.swsp
+		uint16_t imm52 = (inst >>  9) & 0xF,
+		        imm76 = (inst >>  7) & 3;
+
+		uint16_t off = (imm76 << 6) | (imm52 << 2);
+
+		uint32_t rs2 = (inst >> 2) & 31;
+
+		if (!virtWrite<uint32_t>(getReg(2) + off, uint32_t(getReg(rs2))))
+			return;
+	} else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'10) { // c.ldsp
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm43 = (inst >>  5) & 3,
+		        imm86 = (inst >>  2) & 7;
+
+		uint16_t off = (imm86 << 6) | (imm5 << 5) | (imm43 << 3);
+
+		uint32_t rd = (inst >> 7) & 31;
+
+		if (rd == 0)
+			panic("Reserved instruction");
+
+		uint64_t value;
+		if (!virtRead(getReg(2) + off, &value))
+			return;
+
+		setReg(rd, value);
+	} else if ((inst & 0b111'0'00000'00000'11) == 0b001'0'00000'00000'10) { // c.fldsp
+		if (faultOnFSOff(inst))
+			return;
+
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm43 = (inst >>  5) & 3,
+		        imm86 = (inst >>  2) & 7;
+
+		uint16_t off = (imm86 << 6) | (imm5 << 5) | (imm43 << 3);
+
+		uint32_t rd = (inst >> 7) & 31;
+
+		if (rd == 0)
+			panic("Reserved instruction");
+
+		double value;
+		if (!virtRead(getReg(2) + off, &value))
+			return;
+
+		setDReg(rd, value);
+	} else if ((inst & 0b111'0'00000'00000'11) == 0b010'0'00000'00000'10) { // c.lwsp
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm42 = (inst >>  4) & 7,
+		        imm76 = (inst >>  2) & 3;
+
+		uint16_t off = (imm76 << 6) | (imm5 << 5) | (imm42 << 2);
+
+		uint32_t rd = (inst >> 7) & 31;
+
+		if (rd == 0)
+			panic("Reserved instruction");
+
+		int32_t value;
+		if (!virtRead(getReg(2) + off, &value))
+			return;
+
+		setReg(rd, value);
+	} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'00'000'01) { // c.sub
+		uint32_t rs2 = ((inst >> 2) & 7) + 8,
+		        rd  = ((inst >> 7) & 7) + 8;
+
+		setReg(rd, getReg(rd) - getReg(rs2));
+	} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'01'000'01) { // c.xor
+		uint32_t rs2 = ((inst >> 2) & 7) + 8,
+		        rd  = ((inst >> 7) & 7) + 8;
+
+		setReg(rd, getReg(rd) ^ getReg(rs2));
+	} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'10'000'01) { // c.or
+		uint32_t rs2 = ((inst >> 2) & 7) + 8,
+		        rd  = ((inst >> 7) & 7) + 8;
+
+		setReg(rd, getReg(rd) | getReg(rs2));
+	} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'11'000'01) { // c.and
+		uint32_t rs2 = ((inst >> 2) & 7) + 8,
+		        rd  = ((inst >> 7) & 7) + 8;
+
+		setReg(rd, getReg(rd) & getReg(rs2));
+	} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'1'11'000'00'000'01) { // c.subw
+		uint32_t rs2 = ((inst >> 2) & 7) + 8,
+		        rd  = ((inst >> 7) & 7) + 8;
+
+		setReg(rd, int64_t(int32_t(getReg(rd)) - int32_t(getReg(rs2))));
+	} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'1'11'000'01'000'01) { // c.addw
+		uint32_t rs2 = ((inst >> 2) & 7) + 8,
+		        rd  = ((inst >> 7) & 7) + 8;
+
+		setReg(rd, int64_t(int32_t(getReg(rd)) + int32_t(getReg(rs2))));
+	} else if ((inst & 0b111'000'000'00000'11) == 0b110'000'000'00000'01) { // c.beqz
+		uint16_t imm8  = (inst >> 12) & 1,
+		        imm43 = (inst >> 10) & 3,
+		        imm76 = (inst >>  5) & 3,
+		        imm21 = (inst >>  3) & 3,
+		        imm5  = (inst >>  2) & 1;
+
+		uint16_t uimm = (imm8 << 8) | (imm76 << 6) | (imm5 << 5) | (imm43 << 3)
+		                | (imm21 << 1);
+
+		int16_t imm = int16_t(uimm << 7) >> 7;
+
+		uint32_t rs1 = ((inst >> 7) & 7) + 8;
+
+		if (getReg(rs1) == 0) {
+			this->pc += imm;
+			return;
+		}
+	} else if ((inst & 0b111'000'000'00000'11) == 0b111'000'000'00000'01) { // c.bnez
+		uint16_t imm8  = (inst >> 12) & 1,
+		        imm43 = (inst >> 10) & 3,
+		        imm76 = (inst >>  5) & 3,
+		        imm21 = (inst >>  3) & 3,
+		        imm5  = (inst >>  2) & 1;
+
+		uint16_t uimm = (imm8 << 8) | (imm76 << 6) | (imm5 << 5) | (imm43 << 3)
+		                | (imm21 << 1);
+
+		int16_t imm = int16_t(uimm << 7) >> 7;
+
+		uint32_t rs1 = ((inst >> 7) & 7) + 8;
+
+		if (getReg(rs1) != 0) {
+			this->pc += imm;
+			return;
+		}
+	} else {
+		panic("Unknown instruction %04x", inst);
+	}
+
+	this->pc += 2;
+}
+
+void Hart::runInstruction(uint32_t inst)
+{
+	uint32_t opc = inst & 0x7Fu;
+	switch(opc) {
+	case 0x0fu: // fences
+		break;
+	case 0x03u: // load
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		int32_t imm = int32_t(inst) >> 20u;
+
+		uint64_t addr = getReg(rs1) + imm;
+		switch (funct3)
+		{
+		case 0u: { // lb
+			int8_t val;
+			if (!virtRead(addr, &val))
+				return;
+
+			setReg(rd, int64_t(val));
+			break;
+		}
+		case 1u: { // lh
+			int16_t val;
+			if (!virtRead(addr, &val))
+				return;
+
+			setReg(rd, int64_t(val));
+			break;
+		}
+		case 2u: { // lw
+			int32_t val;
+			if (!virtRead(addr, &val))
+				return;
+
+			setReg(rd, int64_t(val));
+			break;
+		}
+		case 3u: { // ld
+			int64_t val;
+			if (!virtRead(addr, &val))
+				return;
+
+			setReg(rd, val);
+			break;
+		}
+		case 4u: { // lbu
+			uint8_t val;
+			if (!virtRead(addr, &val))
+				return;
+
+			setReg(rd, uint64_t(val));
+			break;
+		}
+		case 5u: { // lhu
+			uint16_t val;
+			if (!virtRead(addr, &val))
+				return;
+
+			setReg(rd, uint64_t(val));
+			break;
+		}
+		case 6u: { // lwu
+			uint32_t val;
+			if (!virtRead(addr, &val))
+				return;
+
+			setReg(rd, uint64_t(val));
+			break;
+		}
+		default:
+			panic("Unknown load instruction");
+		}
+		break;
+	}
+	case 0x07u: // FP load
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		int32_t imm = int32_t(inst) >> 20u;
+
+		uint64_t addr = getReg(rs1) + imm;
+		switch (funct3)
+		{
+		case 0b010: { // flw
+			if (faultOnFSOff(inst))
+				return;
+
+			float val;
+			if (!virtRead(addr, &val))
+				return;
+
+			setFReg(rd, val);
+			break;
+		}
+		case 0b011: { // fld
+			if (faultOnFSOff(inst))
+				return;
+
+			double val;
+			if (!virtRead(addr, &val))
+				return;
+
+			setDReg(rd, val);
+			break;
+		}
+		default:
+			panic("Unknown FP load instruction %x", inst);
+		}
+		break;
+	}
+	case 0x13u: // integer immediate
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		int64_t imm = int32_t(inst) >> 20u;
+		uint64_t rawimm = inst >> 20u;
+		switch (funct3)
+		{
+		case 0x0u: // addi
+			setReg(rd, int64_t(getReg(rs1)) + imm);
+			break;
+		case 0x1u: // slli
+			if ((rawimm >> 6u) == 0) // slli
+				setReg(rd, getReg(rs1) << (rawimm & 63u));
+			else
+				panic("Shift not supported");
+
+			break;
+		case 0x2u: // slti
+			setReg(rd, (int64_t(getReg(rs1)) < imm) ? 1u : 0u);
+			break;
+		case 0x3u: // sltiu
+			setReg(rd, (getReg(rs1) < uint64_t(imm)) ? 1u : 0u);
+			break;
+		case 0x4u: // xori
+			setReg(rd, getReg(rs1) ^ imm);
+			break;
+		case 0x5u: // sr(l,a)i
+			if ((rawimm >> 6u) == 0) // srli
+				setReg(rd, getReg(rs1) >> (rawimm & 63u));
+			else if ((rawimm >> 6u) == 0x10u) // srai
+				setReg(rd, int64_t(getReg(rs1)) >> (rawimm & 63u));
+			else
+				panic("Shift not supported");
+
+			break;
+		case 0x6u: // ori
+			setReg(rd, getReg(rs1) | imm);
+			break;
+		case 0x7u: // andi
+			setReg(rd, getReg(rs1) & imm);
+			break;
+		default:
+			panic("Unsupported instruction");
+		}
+		break;
+	}
+	case 0x17u: // auipc
+	{
+		uint32_t rd = (inst >> 7u) & 0x1Fu;
+		setReg(rd, this->pc + int32_t(inst & 0xFFFFF000u));
+		break;
+	}
+	case 0x1Bu: // integer immediate (RV64I)
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		int64_t imm = int32_t(inst) >> 20u;
+		uint64_t rawimm = inst >> 20u;
+		switch (funct3)
+		{
+		case 0x0u: // addiw
+			setReg(rd, int64_t(int32_t(int64_t(getReg(rs1)) + imm)));
+			break;
+		case 0x1u: // slliw
+			if ((rawimm >> 5u) == 0) // slliw
+				setReg(rd, int64_t(int32_t(getReg(rs1) << (rawimm & 31u))));
+			else
+				panic("Shift not supported");
+
+			break;
+		case 0x5u: // sr(l,a)iw
+			if ((rawimm >> 5u) == 0) // srliw
+				setReg(rd, int32_t(uint32_t(getReg(rs1)) >> (rawimm & 31u)));
+			else if ((rawimm >> 6u) == 0x10u) // sraiw
+				setReg(rd, int32_t(uint32_t(getReg(rs1))) >> (rawimm & 31u));
+			else
+				panic("Shift not supported");
+
+			break;
+		default:
+			panic("Unsupported instruction");
+		}
+		break;
+	}
+	case 0x23u: // store
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		int32_t imm = ((int32_t(inst) >> 25u) << 5u) | ((inst >> 7u) & 0x1Fu);
+		uint64_t addr = getReg(rs1) + imm;
+		switch (funct3)
+		{
+		case 0u: // sb
+			if (!virtWrite<uint8_t>(addr, getReg(rs2)))
+				return;
+			break;
+		case 1u: // sh
+			if (!virtWrite<uint16_t>(addr, getReg(rs2)))
+				return;
+			break;
+		case 2u: // sw
+			if (!virtWrite<uint32_t>(addr, getReg(rs2)))
+				return;
+			break;
+		case 3u: // sd
+			if (!virtWrite<uint64_t>(addr, getReg(rs2)))
+				return;
+			break;
+		default:
+			panic("Unknown store");
+		}
+		break;
+	}
+	case 0x27u: // FP store
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		int32_t imm = ((int32_t(inst) >> 25u) << 5u) | ((inst >> 7u) & 0x1Fu);
+
+		uint64_t addr = getReg(rs1) + imm;
+
+		switch (funct3)
+		{
+		case 0b010: { // fsw
+			if (faultOnFSOff(inst))
+				return;
+
+			if (!virtWrite(addr, getFReg(rs2)))
+				return;
+			break;
+		}
+		case 0b011: { // fsd
+			if (faultOnFSOff(inst))
+				return;
+
+			if (!virtWrite(addr, getDReg(rs2)))
+				return;
+			break;
+		}
+		default:
+			panic("Unknown FP store instruction %x", inst);
+		}
+		break;
+	}
+	case 0x2fu: // atomic extension
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		uint32_t funct7 = inst >> 25u;
+
+		// ignore aq and rl bits
+		funct7 &= ~3u;
+
+		switch((funct3 << 8u) | funct7)
+		{
+		case 0x200u: // amoadd.w
+		{
+			uint64_t addr = getReg(rs1);
+			uint32_t val;
+			if (!virtRead<uint32_t>(addr, &val))
+				return;
+
+			if (!virtWrite<uint32_t>(addr, val + uint32_t(getReg(rs2))))
+				return;
+
+			setReg(rd, int64_t(int32_t(val)));
+			break;
+		}
+		case 0x204u: // amoswap.w
+		{
+			uint64_t addr = getReg(rs1);
+			uint32_t val;
+			if (!virtRead<uint32_t>(addr, &val))
+				return;
+
+			if (!virtWrite<uint32_t>(addr, getReg(rs2)))
+				return;
+
+			setReg(rd, int64_t(int32_t(val)));
+			break;
+		}
+		case 0x208u: // lr.w
+		{
+			if (rs2 != 0u)
+				panic("lr with non-zero");
+
+			uint64_t addr = getReg(rs1);
+			uint32_t val;
+			if (!virtRead<uint32_t>(addr, &val))
+				return;
+
+			setReg(rd, int32_t(val));
+			break;
+		}
+		case 0x20cu: // sc.w
+		{
+			uint64_t addr = getReg(rs1);
+			if (!virtWrite<uint32_t>(addr, getReg(rs2)))
+				return;
+
+			setReg(rd, 0u);
+			break;
+		}
+		case 0x300u: // amoadd.d
+		{
+			uint64_t addr = getReg(rs1);
+			uint64_t val;
+			if (!virtRead<uint64_t>(addr, &val))
+				return;
+
+			if (!virtWrite<uint64_t>(addr, val + getReg(rs2)))
+				return;
+
+			setReg(rd, val);
+			break;
+		}
+		case 0x304u: // amoswap.d
+		{
+			// TODO: Is this correct? Several docs disagree...
+			uint64_t addr = getReg(rs1);
+			uint64_t val;
+			if (!virtRead<uint64_t>(addr, &val))
+				return;
+
+			if (!virtWrite<uint64_t>(addr, getReg(rs2)))
+				return;
+
+			setReg(rd, val);
+			break;
+		}
+		case 0x308u: // lr.d
+		{
+			if (rs2 != 0u)
+				panic("lr with non-zero");
+
+			uint64_t addr = getReg(rs1);
+			uint64_t val;
+			if (!virtRead<uint64_t>(addr, &val))
+				return;
+
+			setReg(rd, val);
+			break;
+		}
+		case 0x30cu: // sc.d
+		{
+			uint64_t addr = getReg(rs1);
+			if (!virtWrite<uint64_t>(addr, getReg(rs2)))
+				return;
+
+			setReg(rd, 0u);
+			break;
+		}
+		case 0x310u: // amoxor.d
+		{
+			uint64_t addr = getReg(rs1);
+			uint64_t val;
+			if (!virtRead<uint64_t>(addr, &val))
+				return;
+
+			if (!virtWrite<uint64_t>(addr, val ^ getReg(rs2)))
+				return;
+
+			setReg(rd, val);
+			break;
+		}
+		case 0x220u: // amoor.w
+		{
+			uint64_t addr = getReg(rs1);
+			uint32_t val;
+			if (!virtRead<uint32_t>(addr, &val))
+				return;
+
+			if (!virtWrite<uint32_t>(addr, val | getReg(rs2)))
+				return;
+
+			setReg(rd, int64_t(int32_t(val)));
+			break;
+		}
+		case 0x320u: // amoor.d
+		{
+			uint64_t addr = getReg(rs1);
+			uint64_t val;
+			if (!virtRead<uint64_t>(addr, &val))
+				return;
+
+			if (!virtWrite<uint64_t>(addr, val | getReg(rs2)))
+				return;
+
+			setReg(rd, val);
+			break;
+		}
+		case 0x230u: // amoand.w
+		{
+			uint64_t addr = getReg(rs1);
+			uint32_t val;
+			if (!virtRead<uint32_t>(addr, &val))
+				return;
+
+			if (!virtWrite<uint32_t>(addr, val & getReg(rs2)))
+				return;
+
+			setReg(rd, int64_t(int32_t(val)));
+			break;
+		}
+		case 0x330u: // amoand.d
+		{
+			uint64_t addr = getReg(rs1);
+			uint64_t val;
+			if (!virtRead<uint64_t>(addr, &val))
+				return;
+
+			if (!virtWrite<uint64_t>(addr, val & getReg(rs2)))
+				return;
+
+			setReg(rd, val);
+			break;
+		}
+		case 0x270u: // amomaxu.w
+		{
+			uint64_t addr = getReg(rs1);
+			uint32_t val;
+			if (!virtRead(addr, &val))
+				return;
+
+			if (!virtWrite(addr, max(val, uint32_t(getReg(rs2)))))
+				return;
+
+			setReg(rd, int64_t(int32_t(val)));
+			break;
+		}
+		case 0x370u: // amomaxu
+		{
+			uint64_t addr = getReg(rs1);
+			uint64_t val;
+			if (!virtRead(addr, &val))
+				return;
+
+			if (!virtWrite(addr, max(val, getReg(rs2))))
+				return;
+
+			setReg(rd, val);
+			break;
+		}
+		default:
+			panic("Unimplemented atomic instruction");
+		}
+		break;
+	}
+	case 0x33u: // integer register
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		uint32_t funct7 = inst >> 25u;
+
+		switch((funct3 << 8u) | funct7)
+		{
+		case 0x000u: // add
+			setReg(rd, getReg(rs1) + getReg(rs2));
+			break;
+		case 0x001u: // mul
+			setReg(rd, getReg(rs1) * getReg(rs2));
+			break;
+		case 0x020u: // sub
+			setReg(rd, getReg(rs1) - getReg(rs2));
+			break;
+		case 0x100u: // sll
+			setReg(rd, getReg(rs1) << (getReg(rs2) & 63u));
+			break;
+		case 0x101u: // mulh
+			setReg(rd, (__int128_t(int64_t(getReg(rs1))) * __int128_t(int64_t(getReg(rs2)))) >> 64);
+			break;
+		case 0x200u: // slt
+			setReg(rd, int64_t(getReg(rs1)) < int64_t(getReg(rs2)) ? 1u : 0u);
+			break;
+		case 0x201u: // mulhsu
+			setReg(rd, (__int128_t(int64_t(getReg(rs1))) * __uint128_t(getReg(rs2))) >> 64);
+			break;
+		case 0x300u: // sltu
+			setReg(rd, (getReg(rs1) < getReg(rs2)) ? 1u : 0u);
+			break;
+		case 0x301u: // mulhu
+			setReg(rd, (__uint128_t(getReg(rs1)) * __uint128_t(getReg(rs2))) >> 64);
+			break;
+		case 0x400u: // xor
+			setReg(rd, getReg(rs1) ^ getReg(rs2));
+			break;
+		case 0x401u: // div
+			if (getReg(rs2) == 0)
+				setReg(rd, ~uint64_t(0));
+			else if (int64_t(getReg(rs1)) == INT64_MIN && int64_t(getReg(rs2)) == -1)
+				setReg(rd, uint64_t(INT64_MIN));
+			else
+				setReg(rd, int64_t(getReg(rs1)) / int64_t(getReg(rs2)));
+
+			break;
+		case 0x500u: // srl
+			setReg(rd, getReg(rs1) >> (getReg(rs2) & 63u));
+			break;
+		case 0x501u: // divu
+			if (getReg(rs2) == 0)
+				setReg(rd, ~uint64_t(0));
+			else
+				setReg(rd, getReg(rs1) / getReg(rs2));
+
+			break;
+		case 0x520u: // sra
+			setReg(rd, int64_t(getReg(rs1)) >> (getReg(rs2) & 63u));
+			break;
+		case 0x600u: // or
+			setReg(rd, getReg(rs1) | getReg(rs2));
+			break;
+		case 0x601u: // rem
+			// TODO: Signedness correct?
+			if (getReg(rs2) == 0)
+				setReg(rd, getReg(rs1));
+			else if (int64_t(getReg(rs1)) == INT64_MIN && int64_t(getReg(rs2)) == -1)
+				setReg(rd, 0);
+			else
+				setReg(rd, int64_t(getReg(rs1)) % int64_t(getReg(rs2)));
+			break;
+		case 0x700u: // and
+			setReg(rd, getReg(rs1) & getReg(rs2));
+			break;
+		case 0x701u: // remu
+			if (getReg(rs2) == 0)
+				setReg(rd, getReg(rs1));
+			else
+				setReg(rd, getReg(rs1) % getReg(rs2));
+			break;
+		default:
+			panic("Unknown reg-reg instruction");
+		}
+		break;
+	}
+	case 0x37u: // lui
+	{
+		uint32_t rd = (inst >> 7u) & 0x1Fu;
+		setReg(rd, int64_t(int32_t(inst & 0xFFFFF000u)));
+		break;
+	}
+	case 0x3Bu: // integer register (RV64)
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		uint32_t funct7 = inst >> 25u;
+
+		switch((funct3 << 8u) | funct7)
+		{
+		case 0x000u: // addw
+			setReg(rd, int64_t(int32_t(getReg(rs1)) + int32_t(getReg(rs2))));
+			break;
+		case 0x001u: // mulw
+			setReg(rd, int64_t(int32_t(getReg(rs1)) * int32_t(getReg(rs2))));
+			break;
+		case 0x020u: // subw
+			setReg(rd, int64_t(int32_t(getReg(rs1)) - int32_t(getReg(rs2))));
+			break;
+		case 0x100u: // sllw
+			setReg(rd, int64_t(int32_t(getReg(rs1)) << (getReg(rs2) & 31u)));
+			break;
+		case 0x401u: // divw
+			if (uint32_t(getReg(rs2)) == 0)
+				setReg(rd, ~uint64_t(0));
+			else if (int32_t(getReg(rs1)) == INT32_MIN && int32_t(getReg(rs2)) == -1)
+				setReg(rd, int64_t(INT32_MIN));
+			else
+				setReg(rd, int64_t(int32_t(getReg(rs1)) / int32_t(getReg(rs2))));
+			break;
+		case 0x500u: // srlw
+			setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1)) >> (getReg(rs2) & 31u))));
+			break;
+		case 0x501u: // divuw
+			if (uint32_t(getReg(rs2)) == 0)
+				setReg(rd, ~uint64_t(0));
+			else
+				setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1)) / uint32_t(getReg(rs2)))));
+			break;
+		case 0x520u: // sraw
+			setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1))) >> (getReg(rs2) & 31u)));
+			break;
+		case 0x601u: // remw
+			if (uint32_t(getReg(rs2)) == 0)
+				setReg(rd, int64_t(int32_t(getReg(rs1))));
+			else if (int32_t(getReg(rs1)) == INT32_MIN && int32_t(getReg(rs2)) == -1)
+				setReg(rd, 0);
+			else
+				setReg(rd, int64_t(int32_t(int32_t(getReg(rs1)) % int32_t(getReg(rs2)))));
+			break;
+		case 0x701u: // remuw
+			if (uint32_t(getReg(rs2)) == 0)
+				setReg(rd, int64_t(int32_t(getReg(rs1))));
+			else
+				setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1)) % uint32_t(getReg(rs2)))));
+			break;
+		default:
+			panic("Unknown 32-bit reg-reg instruction");
+		}
+		break;
+	}
+	case 0x43u: // FP
+	case 0x53u: // FP
+	{
+		if (faultOnFSOff(inst))
+			return;
+
+		printf("Unknown FP instruction %x\n", inst);
+		break;
+	}
+	case 0x63u: // branch
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		int64_t rs1vals = int64_t(getReg(rs1));
+		int64_t rs2vals = int64_t(getReg(rs2));
+		uint64_t rs1valu = getReg(rs1);
+		uint64_t rs2valu = getReg(rs2);
+		uint32_t imm12 = inst >> 31u;
+		uint32_t imm105 = (inst >> 25u) & 0x3fu;
+		uint32_t imm41 = (inst >> 8u) & 0xfu;
+		uint32_t imm11 = (inst >> 7u) & 0x1u;
+		int32_t imm = int32_t(((imm12 << 12u) | (imm11 << 11u) | (imm105 << 5u) | (imm41 << 1u)) << 19u) >> 19u;
+		bool take = false;
+		switch (funct3)
+		{
+		case 0u: // beq
+			take = rs1valu == rs2valu;
+			break;
+		case 1u: // bne
+			take = rs1valu != rs2valu;
+			break;
+		case 4u: // blt
+			take = rs1vals < rs2vals;
+			break;
+		case 5u: // bge
+			take = rs1vals >= rs2vals;
+			break;
+		case 6u: // bltu
+			take = rs1valu < rs2valu;
+			break;
+		case 7u: // bgeu
+			take = rs1valu >= rs2valu;
+			break;
+		default:
+			panic("Unsupported branch");
+		}
+		if (take) {
+			this->pc += imm;
+			return;
+		}
+		break;
+	}
+	case 0x67u: // jalr
+	{
+		uint32_t rd = (inst >> 7u) & 0x1Fu;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		int32_t imm = int32_t(inst) >> 20u;
+
+		uint64_t retaddr = this->pc + 4u;
+		this->pc = getReg(rs1) + imm;
+		setReg(rd, retaddr);
+		return;
+	}
+	case 0x6fu: // jal
+	{
+		uint32_t rd = (inst >> 7u) & 0x1Fu;
+		uint32_t imm20 = inst >> 31u;
+		uint32_t imm101 = (inst >> 21u) & 0x3FFu;
+		uint32_t imm11 = (inst >> 20u) & 1u;
+		uint32_t imm1912 = (inst >> 12u) & 0xFFu;
+		int32_t imm = int32_t(((imm20 << 20u) | (imm1912 << 12u) | (imm11 << 11u) | (imm101 << 1u)) << 11u) >> 11u;
+		setReg(rd, this->pc + 4u);
+		this->pc += imm;
+		return;
+	}
+	case 0x73u: // SYSTEM
+	{
+		uint32_t funct3 = (inst >> 12u) & 0x7u;
+		switch(funct3)
+		{
+		case 0u: // Misc stuff
+		{
+			if (inst == 0x00000073u) { // ecall
+				if (this->mode == Hart::MODE_SUPERVISOR)
+					handleSBICall(this);
+				else {
+					this->handleInterrupt(Hart::SCAUSE_ECALL_UMODE, 0);
+					return;
+				}
+			} else if (inst == 0x00100073u) { // ebreak
+				if (this->regs[10] == 3) { // semihosting putc
+					uint8_t ch;
+					if (virtRead(getReg(11), &ch))
+						putchar(ch);
+					else
+						panic("Fault during semihost putc");
+					break;
+				}
+				panic("ebreak");
+			} else if ((inst & 0b1111111'00000'00000'111'11111'1111111) == 0b0001001'00000'00000'000'00000'1110011) {
+				//printf("Doing some fencing\n");
+			} else if (inst == 0x10200073) {
+				this->handleSRET();
+				this->handlePendingInterrupts();
+				return;
+			} else if (inst == 0x10500073) { // wfi
+				//asm ("hlt");
+				break;
+			} else
+				panic("Unsupported misc instruction");
+
+			break;
+		}
+		case 1u: // CSRRW
+		{
+			uint16_t csr = inst >> 20u;
+			unsigned int rd = (inst >> 7u) & 31u;
+			unsigned int rs1 = (inst >> 15u) & 31u;
+			uint64_t rs1val = getReg(rs1);
+
+			if (rd != 0u) // No getCSR side effect if rd is zero
+				setReg(rd, getCSR(csr));
+
+			setCSR(csr, rs1val);
+			break;
+		}
+		case 2u: // CSRRS
+		{
+			uint16_t csr = inst >> 20u;
+			unsigned int rd = (inst >> 7u) & 31u;
+			unsigned int rs1 = (inst >> 15u) & 31u;
+			uint64_t csrval = getCSR(csr);
+			uint64_t rs1val = getReg(rs1);
+			setReg(rd, getCSR(csr));
+
+			if (rs1 != 0) // No setCSR side effect if rs1 is zero
+				setCSR(csr, csrval | rs1val);
+
+			break;
+		}
+		case 3u: // CSRRC
+		{
+			uint16_t csr = inst >> 20u;
+			unsigned int rd = (inst >> 7u) & 31u;
+			unsigned int rs1 = (inst >> 15u) & 31u;
+			uint64_t csrval = getCSR(csr);
+			uint64_t rs1val = getReg(rs1);
+			setReg(rd, getCSR(csr));
+
+			if (rs1 != 0) // No setCSR side effect if rs1 is zero
+				setCSR(csr, csrval & ~rs1val);
+
+			break;
+		}
+		case 5u: // CSRRWI
+		{
+			uint16_t csr = inst >> 20u;
+			unsigned int rd = (inst >> 7u) & 31u;
+			if (rd != 0u) // No getCSR side effect if rd is zero
+				setReg(rd, getCSR(csr));
+
+			uint64_t imm = (inst >> 15u) & 31u;
+			setCSR(csr, imm);
+			break;
+		}
+		case 6u: // CSRRSI
+		{
+			uint16_t csr = inst >> 20u;
+			unsigned int rd = (inst >> 7u) & 31u;
+			uint64_t imm = (inst >> 15u) & 31u;
+			uint64_t csrval = getCSR(csr);
+			setReg(rd, csrval);
+			setCSR(csr, csrval | imm);
+			break;
+		}
+		case 7u: // CSRRCI
+		{
+			uint16_t csr = inst >> 20u;
+			unsigned int rd = (inst >> 7u) & 31u;
+			uint64_t imm = (inst >> 15u) & 31u;
+			uint64_t csrval = getCSR(csr);
+			setReg(rd, csrval);
+			setCSR(csr, csrval & ~imm);
+			break;
+		}
+		default:
+			panic("Unknown SYSTEM instruction");
+		}
+
+		// Immediately check for interrupts
+		this->pc += 4;
+		this->handlePendingInterrupts();
+		return;
+	}
+	default:
+		panic("Unknown instruction %08x", inst);
+	}
+
+	this->pc += 4;
+}
+
 void Hart::run()
 {
-	Hart *hart = this;
-
 	for(;;)
 	{
 		static uint32_t counter = 0;
 		if ((counter++ % 1024) == 0) {
 			global_time += 16;
-			hart->handlePendingInterrupts();
+			this->handlePendingInterrupts();
 		}
 
 		// Fetch 16 bits at a time. Due to IALIGN=16, a 32-bit wide instruction
 		// may cross a page boundary and fault.
 		uint16_t inst16;
-		if (!hart->fetchInstruction(&inst16, hart->pc))
+		if (!this->fetchInstruction(&inst16, this->pc))
 			continue;
 
 		// 16-bit wide compressed instruction?
 		if ((inst16 & 0b11) != 0b11)
 		{
-			const uint16_t inst = inst16;
-
-			if ((inst & 0xE003) == 0xA001) { // c.j
-				// This is atrocious.
-				uint16_t imm11 = (inst >> 12) & 1,
-						 imm4  = (inst >> 11) & 1,
-						 imm98 = (inst >>  9) & 3,
-						 imm10 = (inst >>  8) & 1,
-						 imm6  = (inst >>  7) & 1,
-						 imm7  = (inst >>  6) & 1,
-						 imm31 = (inst >>  3) & 7,
-						 imm5  = (inst >>  2) & 1;
-
-				uint16_t imm = (imm11 << 11) | (imm10 << 10) | (imm98 << 8)
-						| (imm7 << 7) | (imm6 << 6) | (imm5 << 5)
-						| (imm4 << 4) | (imm31 << 1);
-
-				const int16_t offs = int16_t(imm << 4) >> 4;
-
-				hart->pc += offs;
-				continue;
-			} else if ((inst & 0xE003) == 0x4001) { // c.li
-				uint16_t imm5  = (inst >> 12) & 1,
-						 imm40 = (inst >> 2) & 0x1F;
-
-				int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
-				uint32_t rd = (inst >> 7) & 0x1F;
-				setReg(rd, uint64_t(imm));
-			} else if ((inst & 0b111'0'00000'00000'11) == 0b000'0'00000'00000'10) { // c.slli
-				uint16_t imm5  = (inst >> 12) & 1,
-						 imm40 = (inst >> 2) & 0x1F;
-
-				uint16_t imm = (imm5 << 5) | imm40;
-				uint32_t rd = (inst >> 7) & 0x1F;
-				setReg(rd, getReg(rd) << imm);
-			} else if ((inst & 0xEF83) == 0x6101) { // c.addi16sp (must come before c.lui)
-				uint16_t imm9  = (inst >> 12) & 1,
-						 imm4  = (inst >>  6) & 1,
-						 imm6  = (inst >>  5) & 1,
-						 imm87 = (inst >>  3) & 3,
-						 imm5  = (inst >>  2) & 1;
-
-				uint16_t uimm = (imm9 << 9) | (imm87 << 7) | (imm6 << 6)
-						| (imm5 << 5) | (imm4 << 4);
-
-				int16_t imm = int16_t(uimm << 6) >> 6;
-				uint32_t rd = 2;
-				setReg(rd, getReg(2) + imm);
-			} else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'01) { // c.lui (after c.addi16sp)
-				uint16_t imm17   = (inst >> 12) & 1,
-						 imm1612 = (inst >>  2) & 0x1F;
-
-				int32_t imm = int32_t(((imm17 << 17) | (imm1612 << 12)) << 14) >> 14;
-				uint32_t rd = (inst >> 7) & 0x1F;
-				setReg(rd, int64_t(imm));
-			} else if (inst == 0) { // Illegal (before c.addi4spn)
-				panic("Illegal 0000 instruction");
-			} else if ((inst & 0b111'00000000'000'11) == 0b000'00000000'000'00) { // c.addi4spn (after illegal)
-				uint16_t imm54 = (inst >> 11) & 3,
-						 imm96 = (inst >>  7) & 0xF,
-						 imm2  = (inst >>  6) & 1,
-						 imm3  = (inst >>  5) & 1;
-
-				uint16_t uimm = (imm96 << 6) | (imm54 << 4) | (imm3 << 3)
-						| (imm2 << 2);
-
-				uint32_t rd = ((inst >> 2) & 7) + 8;
-				setReg(rd, getReg(2) + uimm);
-			} else if ((inst & 0b111'0'11111'00000'11) == 0b000'0'00000'00000'01) { // c.nop (before c.addi)
-				// nop
-			} else if ((inst & 0b111'0'00000'00000'11) == 0b000'0'00000'00000'01) { // c.addi (after c.nop)
-				uint16_t imm5  = (inst >> 12) & 1,
-						 imm40 = (inst >>  2) & 0x1F;
-
-				int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
-				uint32_t rd = (inst >> 7) & 0x1F;
-				setReg(rd, getReg(rd) + imm);
-			} else if ((inst & 0b111'0'00000'00000'11) == 0b001'0'00000'00000'01) { // c.addiw
-				uint16_t imm5  = (inst >> 12) & 1,
-						 imm40 = (inst >>  2) & 0x1F;
-
-				int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
-				uint32_t rd = (inst >> 7) & 0x1F;
-				setReg(rd, int64_t(int32_t(getReg(rd) + imm)));
-			} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'00'000'00000'01) { // c.srli
-				uint16_t imm5  = (inst >> 12) & 1,
-						 imm40 = (inst >>  2) & 0x1F;
-
-				uint16_t imm = (imm5 << 5) | imm40;
-				uint32_t rd = ((inst >> 7) & 7) + 8;
-				setReg(rd, getReg(rd) >> imm);
-			} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'01'000'00000'01) { // c.srai
-				uint16_t imm5  = (inst >> 12) & 1,
-						 imm40 = (inst >>  2) & 0x1F;
-
-				uint16_t imm = (imm5 << 5) | imm40;
-				uint32_t rd = ((inst >> 7) & 7) + 8;
-				setReg(rd, int64_t(getReg(rd)) >> imm);
-			} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'10'000'00000'01) { // c.andi
-				uint16_t imm5  = (inst >> 12) & 1,
-						 imm40 = (inst >>  2) & 0x1F;
-
-				int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
-				uint32_t rd = ((inst >> 7) & 7) + 8;
-				setReg(rd, getReg(rd) & uint64_t(imm));
-			} else if ((inst & 0b111'000'000'00'000'11) == 0b011'000'000'00'000'00) { // c.ld
-				uint16_t imm53 = (inst >> 10) & 7,
-						 imm76 = (inst >>  5) & 3;
-
-				uint16_t off = (imm76 << 6) | (imm53 << 3);
-
-				uint32_t rs1 = ((inst >> 7) & 7) + 8,
-						 rd  = ((inst >> 2) & 7) + 8;
-
-				uint64_t value;
-				if (!virtRead<uint64_t>(getReg(rs1) + off, &value))
-					continue;
-
-				setReg(rd, value);
-			} else if ((inst & 0b111'000'000'00'000'11) == 0b001'000'000'00'000'00) { // c.fld
-				if (faultOnFSOff(inst))
-					continue;
-
-				uint16_t imm53 = (inst >> 10) & 7,
-						 imm76 = (inst >>  5) & 3;
-
-				uint16_t off = (imm76 << 6) | (imm53 << 3);
-
-				uint32_t rs1 = ((inst >> 7) & 7) + 8,
-						 rd  = ((inst >> 2) & 7) + 8;
-
-				double value;
-				if (!virtRead(getReg(rs1) + off, &value))
-					continue;
-
-				setDReg(rd, value);
-			} else if ((inst & 0b111'000'000'00'000'11) == 0b010'000'000'00'000'00) { // c.lw
-				uint16_t imm53 = (inst >> 10) & 7,
-						 imm2  = (inst >>  6) & 1,
-						 imm6  = (inst >>  5) & 1;
-
-				uint16_t off = (imm6 << 6) | (imm53 << 3) | (imm2 << 2);
-
-				uint32_t rs1 = ((inst >> 7) & 7) + 8,
-						 rd  = ((inst >> 2) & 7) + 8;
-
-				int32_t value;
-				if (!virtRead<int32_t>(getReg(rs1) + off, &value))
-					continue;
-
-				setReg(rd, value);
-			} else if ((inst & 0b111'000'000'00'000'11) == 0b110'000'000'00'000'00) { // c.sw
-				uint16_t imm53 = (inst >> 10) & 7,
-						 imm2  = (inst >>  6) & 1,
-						 imm6  = (inst >>  5) & 1;
-
-				uint16_t off = (imm6 << 6) | (imm53 << 3) | (imm2 << 2);
-
-				uint32_t rs1 = ((inst >> 7) & 7) + 8,
-						 rs2 = ((inst >> 2) & 7) + 8;
-
-				if (!virtWrite<uint32_t>(getReg(rs1) + off, getReg(rs2)))
-					continue;
-			} else if ((inst & 0b111'000'000'00'000'11) == 0b111'000'000'00'000'00) { // c.sd
-				uint16_t imm53 = (inst >> 10) & 7,
-						 imm76 = (inst >>  5) & 3;
-
-				uint16_t off = (imm76 << 6) | (imm53 << 3);
-
-				uint32_t rs1 = ((inst >> 7) & 7) + 8,
-						 rs2 = ((inst >> 2) & 7) + 8;
-
-				if (!virtWrite<uint64_t>(getReg(rs1) + off, getReg(rs2)))
-					continue;
-			} else if ((inst & 0b111'000'000'00'000'11) == 0b101'000'000'00'000'00) { // c.fsd
-				if (faultOnFSOff(inst))
-					continue;
-
-				uint16_t imm53 = (inst >> 10) & 7,
-						 imm76 = (inst >>  5) & 3;
-
-				uint16_t off = (imm76 << 6) | (imm53 << 3);
-
-				uint32_t rs1 = ((inst >> 7) & 7) + 8,
-						 rs2 = ((inst >> 2) & 7) + 8;
-
-				if (!virtWrite<double>(getReg(rs1) + off, getDReg(rs2)))
-					continue;
-			} else if ((inst & 0b111'1'00000'11111'11) == 0b100'0'00000'00000'10) { // c.jr (before c.mv)
-				uint32_t rs1 = (inst >> 7) & 0x1F;
-
-				if (rs1 == 0)
-					panic("Reserved c.???");
-
-				hart->pc = getReg(rs1);
-				continue;
-			} else if ((inst & 0b111'1'00000'00000'11) == 0b100'0'00000'00000'10) { // c.mv (after c.jr)
-				uint32_t rs2 = (inst >> 2) & 0x1F,
-						 rd  = (inst >> 7) & 0x1F;
-
-				setReg(rd, getReg(rs2));
-			} else if ((inst & 0b111'1'11111'11111'11) == 0b100'1'00000'00000'10) { // c.ebreak
-				hart->handleInterrupt(Hart::SCAUSE_EBREAK, 0);
-				continue;
-			} else if ((inst & 0b111'1'00000'11111'11) == 0b100'1'00000'00000'10) { // c.jalr (after c.ebreak)
-				uint32_t rs1 = (inst >> 7u) & 0x1Fu;
-				uint64_t retaddr = hart->pc + 2u;
-				hart->pc = getReg(rs1);
-				setReg(1, retaddr);
-				continue;
-			} else if ((inst & 0b111'1'00000'00000'11) == 0b100'1'00000'00000'10) { // c.add (after c.jalr)
-				uint32_t rs2 = (inst >> 2) & 0x1F,
-						 rd  = (inst >> 7) & 0x1F;
-
-				setReg(rd, getReg(rd) + getReg(rs2));
-			} else if ((inst & 0b111'000000'00000'11) == 0b111'000000'00000'10) { // c.sdsp
-				uint16_t imm53 = (inst >> 10) & 7,
-						 imm86 = (inst >>  7) & 7;
-
-				uint16_t off = (imm86 << 6) | (imm53 << 3);
-
-				uint32_t rs2 = (inst >> 2) & 31;
-
-				if (!virtWrite(getReg(2) + off, getReg(rs2)))
-					continue;
-			} else if ((inst & 0b111'000000'00000'11) == 0b101'000000'00000'10) { // c.fsdsp
-				if (faultOnFSOff(inst))
-					continue;
-
-				uint16_t imm53 = (inst >> 10) & 7,
-						 imm86 = (inst >>  7) & 7;
-
-				uint16_t off = (imm86 << 6) | (imm53 << 3);
-
-				uint32_t rs2 = (inst >> 2) & 31;
-
-				if (!virtWrite(getReg(2) + off, getDReg(rs2)))
-					continue;
-			} else if ((inst & 0b111'000000'00000'11) == 0b110'000000'00000'10) { // c.swsp
-				uint16_t imm52 = (inst >>  9) & 0xF,
-						 imm76 = (inst >>  7) & 3;
-
-				uint16_t off = (imm76 << 6) | (imm52 << 2);
-
-				uint32_t rs2 = (inst >> 2) & 31;
-
-				if (!virtWrite<uint32_t>(getReg(2) + off, uint32_t(getReg(rs2))))
-					continue;
-			} else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'10) { // c.ldsp
-				uint16_t imm5  = (inst >> 12) & 1,
-						 imm43 = (inst >>  5) & 3,
-						 imm86 = (inst >>  2) & 7;
-
-				uint16_t off = (imm86 << 6) | (imm5 << 5) | (imm43 << 3);
-
-				uint32_t rd = (inst >> 7) & 31;
-
-				if (rd == 0)
-					panic("Reserved instruction");
-
-				uint64_t value;
-				if (!virtRead(getReg(2) + off, &value))
-					continue;
-
-				setReg(rd, value);
-			} else if ((inst & 0b111'0'00000'00000'11) == 0b001'0'00000'00000'10) { // c.fldsp
-				if (faultOnFSOff(inst))
-					continue;
-
-				uint16_t imm5  = (inst >> 12) & 1,
-						 imm43 = (inst >>  5) & 3,
-						 imm86 = (inst >>  2) & 7;
-
-				uint16_t off = (imm86 << 6) | (imm5 << 5) | (imm43 << 3);
-
-				uint32_t rd = (inst >> 7) & 31;
-
-				if (rd == 0)
-					panic("Reserved instruction");
-
-				double value;
-				if (!virtRead(getReg(2) + off, &value))
-					continue;
-
-				setDReg(rd, value);
-			} else if ((inst & 0b111'0'00000'00000'11) == 0b010'0'00000'00000'10) { // c.lwsp
-				uint16_t imm5  = (inst >> 12) & 1,
-						 imm42 = (inst >>  4) & 7,
-						 imm76 = (inst >>  2) & 3;
-
-				uint16_t off = (imm76 << 6) | (imm5 << 5) | (imm42 << 2);
-
-				uint32_t rd = (inst >> 7) & 31;
-
-				if (rd == 0)
-					panic("Reserved instruction");
-
-				int32_t value;
-				if (!virtRead(getReg(2) + off, &value))
-					continue;
-
-				setReg(rd, value);
-			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'00'000'01) { // c.sub
-				uint32_t rs2 = ((inst >> 2) & 7) + 8,
-						 rd  = ((inst >> 7) & 7) + 8;
-
-				setReg(rd, getReg(rd) - getReg(rs2));
-			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'01'000'01) { // c.xor
-				uint32_t rs2 = ((inst >> 2) & 7) + 8,
-						 rd  = ((inst >> 7) & 7) + 8;
-
-				setReg(rd, getReg(rd) ^ getReg(rs2));
-			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'10'000'01) { // c.or
-				uint32_t rs2 = ((inst >> 2) & 7) + 8,
-						 rd  = ((inst >> 7) & 7) + 8;
-
-				setReg(rd, getReg(rd) | getReg(rs2));
-			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'0'11'000'11'000'01) { // c.and
-				uint32_t rs2 = ((inst >> 2) & 7) + 8,
-						 rd  = ((inst >> 7) & 7) + 8;
-
-				setReg(rd, getReg(rd) & getReg(rs2));
-			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'1'11'000'00'000'01) { // c.subw
-				uint32_t rs2 = ((inst >> 2) & 7) + 8,
-						 rd  = ((inst >> 7) & 7) + 8;
-
-				setReg(rd, int64_t(int32_t(getReg(rd)) - int32_t(getReg(rs2))));
-			} else if ((inst & 0b111'1'11'000'11'000'11) == 0b100'1'11'000'01'000'01) { // c.addw
-				uint32_t rs2 = ((inst >> 2) & 7) + 8,
-						 rd  = ((inst >> 7) & 7) + 8;
-
-				setReg(rd, int64_t(int32_t(getReg(rd)) + int32_t(getReg(rs2))));
-			} else if ((inst & 0b111'000'000'00000'11) == 0b110'000'000'00000'01) { // c.beqz
-				uint16_t imm8  = (inst >> 12) & 1,
-						 imm43 = (inst >> 10) & 3,
-						 imm76 = (inst >>  5) & 3,
-						 imm21 = (inst >>  3) & 3,
-						 imm5  = (inst >>  2) & 1;
-
-				uint16_t uimm = (imm8 << 8) | (imm76 << 6) | (imm5 << 5) | (imm43 << 3)
-								| (imm21 << 1);
-
-				int16_t imm = int16_t(uimm << 7) >> 7;
-
-				uint32_t rs1 = ((inst >> 7) & 7) + 8;
-
-				if (getReg(rs1) == 0) {
-					hart->pc += imm;
-					continue;
-				}
-			} else if ((inst & 0b111'000'000'00000'11) == 0b111'000'000'00000'01) { // c.bnez
-				uint16_t imm8  = (inst >> 12) & 1,
-						 imm43 = (inst >> 10) & 3,
-						 imm76 = (inst >>  5) & 3,
-						 imm21 = (inst >>  3) & 3,
-						 imm5  = (inst >>  2) & 1;
-
-				uint16_t uimm = (imm8 << 8) | (imm76 << 6) | (imm5 << 5) | (imm43 << 3)
-								| (imm21 << 1);
-
-				int16_t imm = int16_t(uimm << 7) >> 7;
-
-				uint32_t rs1 = ((inst >> 7) & 7) + 8;
-
-				if (getReg(rs1) != 0) {
-					hart->pc += imm;
-					continue;
-				}
-			} else {
-				panic("Unknown instruction %04x", inst);
-			}
-
-			hart->pc += 2;
+			runRVCInstruction(inst16);
 			continue;
 		}
 
 		// (at least) 32-bit wide instruction. Fetch the remaining 16 bits.
 		uint32_t inst = inst16;
-		if (!hart->fetchInstruction(&inst16, hart->pc + 2))
+		if (!this->fetchInstruction(&inst16, this->pc + 2))
 			continue;
 
 		inst |= inst16 << 16;
-
-		uint32_t opc = inst & 0x7Fu;
-		switch(opc) {
-		case 0x0fu: // fences
-			break;
-		case 0x03u: // load
-		{
-			uint32_t funct3 = (inst >> 12u) & 7u;
-			uint32_t rd = (inst >> 7u) & 31u;
-			uint32_t rs1 = (inst >> 15u) & 31u;
-			int32_t imm = int32_t(inst) >> 20u;
-
-			uint64_t addr = getReg(rs1) + imm;
-			switch (funct3)
-			{
-				case 0u: { // lb
-					int8_t val;
-					if (!virtRead(addr, &val))
-						continue;
-
-					setReg(rd, int64_t(val));
-					break;
-				}
-				case 1u: { // lh
-					int16_t val;
-					if (!virtRead(addr, &val))
-						continue;
-
-					setReg(rd, int64_t(val));
-					break;
-				}
-				case 2u: { // lw
-					int32_t val;
-					if (!virtRead(addr, &val))
-						continue;
-
-					setReg(rd, int64_t(val));
-					break;
-				}
-				case 3u: { // ld
-					int64_t val;
-					if (!virtRead(addr, &val))
-						continue;
-
-					setReg(rd, val);
-					break;
-				}
-				case 4u: { // lbu
-					uint8_t val;
-					if (!virtRead(addr, &val))
-						continue;
-
-					setReg(rd, uint64_t(val));
-					break;
-				}
-				case 5u: { // lhu
-					uint16_t val;
-					if (!virtRead(addr, &val))
-						continue;
-
-					setReg(rd, uint64_t(val));
-					break;
-				}
-				case 6u: { // lwu
-					uint32_t val;
-					if (!virtRead(addr, &val))
-						continue;
-
-					setReg(rd, uint64_t(val));
-					break;
-				}
-				default:
-					panic("Unknown load instruction");
-			}
-			break;
-		}
-		case 0x07u: // FP load
-		{
-			uint32_t funct3 = (inst >> 12u) & 7u;
-			uint32_t rd = (inst >> 7u) & 31u;
-			uint32_t rs1 = (inst >> 15u) & 31u;
-			int32_t imm = int32_t(inst) >> 20u;
-
-			uint64_t addr = getReg(rs1) + imm;
-			switch (funct3)
-			{
-			case 0b010: { // flw
-				if (faultOnFSOff(inst))
-					continue;
-
-				float val;
-				if (!virtRead(addr, &val))
-					continue;
-
-				setFReg(rd, val);
-				break;
-			}
-			case 0b011: { // fld
-				if (faultOnFSOff(inst))
-					continue;
-
-				double val;
-				if (!virtRead(addr, &val))
-					continue;
-
-				setDReg(rd, val);
-				break;
-			}
-			default:
-				panic("Unknown FP load instruction %x", inst);
-			}
-			break;
-		}
-		case 0x13u: // integer immediate
-		{
-			uint32_t funct3 = (inst >> 12u) & 7u;
-			uint32_t rd = (inst >> 7u) & 31u;
-			uint32_t rs1 = (inst >> 15u) & 31u;
-			int64_t imm = int32_t(inst) >> 20u;
-			uint64_t rawimm = inst >> 20u;
-			switch (funct3)
-			{
-				case 0x0u: // addi
-					setReg(rd, int64_t(getReg(rs1)) + imm);
-					break;
-				case 0x1u: // slli
-					if ((rawimm >> 6u) == 0) // slli
-						setReg(rd, getReg(rs1) << (rawimm & 63u));
-					else
-						panic("Shift not supported");
-
-					break;
-				case 0x2u: // slti
-					setReg(rd, (int64_t(getReg(rs1)) < imm) ? 1u : 0u);
-					break;
-				case 0x3u: // sltiu
-					setReg(rd, (getReg(rs1) < uint64_t(imm)) ? 1u : 0u);
-					break;
-				case 0x4u: // xori
-					setReg(rd, getReg(rs1) ^ imm);
-					break;
-				case 0x5u: // sr(l,a)i
-					if ((rawimm >> 6u) == 0) // srli
-						setReg(rd, getReg(rs1) >> (rawimm & 63u));
-					else if ((rawimm >> 6u) == 0x10u) // srai
-						setReg(rd, int64_t(getReg(rs1)) >> (rawimm & 63u));
-					else
-						panic("Shift not supported");
-
-					break;
-				case 0x6u: // ori
-					setReg(rd, getReg(rs1) | imm);
-					break;
-				case 0x7u: // andi
-					setReg(rd, getReg(rs1) & imm);
-					break;
-				default:
-					panic("Unsupported instruction");
-			}
-			break;
-		}
-		case 0x17u: // auipc
-		{
-			uint32_t rd = (inst >> 7u) & 0x1Fu;
-			setReg(rd, hart->pc + int32_t(inst & 0xFFFFF000u));
-			break;
-		}
-		case 0x1Bu: // integer immediate (RV64I)
-		{
-			uint32_t funct3 = (inst >> 12u) & 7u;
-			uint32_t rd = (inst >> 7u) & 31u;
-			uint32_t rs1 = (inst >> 15u) & 31u;
-			int64_t imm = int32_t(inst) >> 20u;
-			uint64_t rawimm = inst >> 20u;
-			switch (funct3)
-			{
-				case 0x0u: // addiw
-					setReg(rd, int64_t(int32_t(int64_t(getReg(rs1)) + imm)));
-					break;
-				case 0x1u: // slliw
-					if ((rawimm >> 5u) == 0) // slliw
-						setReg(rd, int64_t(int32_t(getReg(rs1) << (rawimm & 31u))));
-					else
-						panic("Shift not supported");
-
-					break;
-				case 0x5u: // sr(l,a)iw
-					if ((rawimm >> 5u) == 0) // srliw
-						setReg(rd, int32_t(uint32_t(getReg(rs1)) >> (rawimm & 31u)));
-					else if ((rawimm >> 6u) == 0x10u) // sraiw
-						setReg(rd, int32_t(uint32_t(getReg(rs1))) >> (rawimm & 31u));
-					else
-						panic("Shift not supported");
-
-					break;
-				default:
-					panic("Unsupported instruction");
-			}
-			break;
-		}
-		case 0x23u: // store
-		{
-			uint32_t funct3 = (inst >> 12u) & 7u;
-			uint32_t rs1 = (inst >> 15u) & 31u;
-			uint32_t rs2 = (inst >> 20u) & 31u;
-			int32_t imm = ((int32_t(inst) >> 25u) << 5u) | ((inst >> 7u) & 0x1Fu);
-			uint64_t addr = getReg(rs1) + imm;
-			switch (funct3)
-			{
-			case 0u: // sb
-				if (!virtWrite<uint8_t>(addr, getReg(rs2)))
-					continue;
-				break;
-			case 1u: // sh
-				if (!virtWrite<uint16_t>(addr, getReg(rs2)))
-					continue;
-				break;
-			case 2u: // sw
-				if (!virtWrite<uint32_t>(addr, getReg(rs2)))
-					continue;
-				break;
-			case 3u: // sd
-				if (!virtWrite<uint64_t>(addr, getReg(rs2)))
-					continue;
-				break;
-			default:
-				panic("Unknown store");
-			}
-			break;
-		}
-		case 0x27u: // FP store
-		{
-			uint32_t funct3 = (inst >> 12u) & 7u;
-			uint32_t rs1 = (inst >> 15u) & 31u;
-			uint32_t rs2 = (inst >> 20u) & 31u;
-			int32_t imm = ((int32_t(inst) >> 25u) << 5u) | ((inst >> 7u) & 0x1Fu);
-
-			uint64_t addr = getReg(rs1) + imm;
-
-			switch (funct3)
-			{
-			case 0b010: { // fsw
-				if (faultOnFSOff(inst))
-					continue;
-
-				if (!virtWrite(addr, getFReg(rs2)))
-					continue;
-				break;
-			}
-			case 0b011: { // fsd
-				if (faultOnFSOff(inst))
-					continue;
-
-				if (!virtWrite(addr, getDReg(rs2)))
-					continue;
-				break;
-			}
-			default:
-				panic("Unknown FP store instruction %x", inst);
-			}
-			break;
-		}
-		case 0x2fu: // atomic extension
-		{
-			uint32_t funct3 = (inst >> 12u) & 7u;
-			uint32_t rd = (inst >> 7u) & 31u;
-			uint32_t rs1 = (inst >> 15u) & 31u;
-			uint32_t rs2 = (inst >> 20u) & 31u;
-			uint32_t funct7 = inst >> 25u;
-
-			// ignore aq and rl bits
-			funct7 &= ~3u;
-
-			switch((funct3 << 8u) | funct7)
-			{
-				case 0x200u: // amoadd.w
-				{
-				    uint64_t addr = getReg(rs1);
-					uint32_t val;
-					if (!virtRead<uint32_t>(addr, &val))
-						continue;
-
-					if (!virtWrite<uint32_t>(addr, val + uint32_t(getReg(rs2))))
-						continue;
-
-					setReg(rd, int64_t(int32_t(val)));
-					break;
-				}
-				case 0x204u: // amoswap.w
-				{
-				    uint64_t addr = getReg(rs1);
-					uint32_t val;
-					if (!virtRead<uint32_t>(addr, &val))
-						continue;
-
-					if (!virtWrite<uint32_t>(addr, getReg(rs2)))
-						continue;
-
-					setReg(rd, int64_t(int32_t(val)));
-					break;
-				}
-				case 0x208u: // lr.w
-				{
-					if (rs2 != 0u)
-						panic("lr with non-zero");
-
-					uint64_t addr = getReg(rs1);
-					uint32_t val;
-					if (!virtRead<uint32_t>(addr, &val))
-						continue;
-
-					setReg(rd, int32_t(val));
-					break;
-				}
-				case 0x20cu: // sc.w
-				{
-				    uint64_t addr = getReg(rs1);
-					if (!virtWrite<uint32_t>(addr, getReg(rs2)))
-						continue;
-
-					setReg(rd, 0u);
-					break;
-				}
-				case 0x300u: // amoadd.d
-				{
-				    uint64_t addr = getReg(rs1);
-					uint64_t val;
-					if (!virtRead<uint64_t>(addr, &val))
-						continue;
-
-					if (!virtWrite<uint64_t>(addr, val + getReg(rs2)))
-						continue;
-
-					setReg(rd, val);
-					break;
-				}
-				case 0x304u: // amoswap.d
-				{
-					// TODO: Is this correct? Several docs disagree...
-				    uint64_t addr = getReg(rs1);
-					uint64_t val;
-					if (!virtRead<uint64_t>(addr, &val))
-						continue;
-
-					if (!virtWrite<uint64_t>(addr, getReg(rs2)))
-						continue;
-
-					setReg(rd, val);
-					break;
-				}
-				case 0x308u: // lr.d
-				{
-					if (rs2 != 0u)
-						panic("lr with non-zero");
-
-					uint64_t addr = getReg(rs1);
-					uint64_t val;
-					if (!virtRead<uint64_t>(addr, &val))
-						continue;
-
-					setReg(rd, val);
-					break;
-				}
-				case 0x30cu: // sc.d
-				{
-				    uint64_t addr = getReg(rs1);
-					if (!virtWrite<uint64_t>(addr, getReg(rs2)))
-						continue;
-
-					setReg(rd, 0u);
-					break;
-				}
-				case 0x310u: // amoxor.d
-				{
-				    uint64_t addr = getReg(rs1);
-					uint64_t val;
-					if (!virtRead<uint64_t>(addr, &val))
-						continue;
-
-					if (!virtWrite<uint64_t>(addr, val ^ getReg(rs2)))
-						continue;
-
-					setReg(rd, val);
-					break;
-				}
-				case 0x220u: // amoor.w
-				{
-				    uint64_t addr = getReg(rs1);
-					uint32_t val;
-					if (!virtRead<uint32_t>(addr, &val))
-						continue;
-
-					if (!virtWrite<uint32_t>(addr, val | getReg(rs2)))
-						continue;
-
-					setReg(rd, int64_t(int32_t(val)));
-					break;
-				}
-				case 0x320u: // amoor.d
-				{
-				    uint64_t addr = getReg(rs1);
-					uint64_t val;
-					if (!virtRead<uint64_t>(addr, &val))
-						continue;
-
-					if (!virtWrite<uint64_t>(addr, val | getReg(rs2)))
-						continue;
-
-					setReg(rd, val);
-					break;
-				}
-				case 0x230u: // amoand.w
-				{
-				    uint64_t addr = getReg(rs1);
-					uint32_t val;
-					if (!virtRead<uint32_t>(addr, &val))
-						continue;
-
-					if (!virtWrite<uint32_t>(addr, val & getReg(rs2)))
-						continue;
-
-					setReg(rd, int64_t(int32_t(val)));
-					break;
-				}
-				case 0x330u: // amoand.d
-				{
-				    uint64_t addr = getReg(rs1);
-					uint64_t val;
-					if (!virtRead<uint64_t>(addr, &val))
-						continue;
-
-					if (!virtWrite<uint64_t>(addr, val & getReg(rs2)))
-						continue;
-
-					setReg(rd, val);
-					break;
-				}
-				case 0x270u: // amomaxu.w
-				{
-				    uint64_t addr = getReg(rs1);
-					uint32_t val;
-					if (!virtRead(addr, &val))
-						continue;
-
-					if (!virtWrite(addr, max(val, uint32_t(getReg(rs2)))))
-						continue;
-
-					setReg(rd, int64_t(int32_t(val)));
-					break;
-				}
-				case 0x370u: // amomaxu
-				{
-				    uint64_t addr = getReg(rs1);
-					uint64_t val;
-					if (!virtRead(addr, &val))
-						continue;
-
-					if (!virtWrite(addr, max(val, getReg(rs2))))
-						continue;
-
-					setReg(rd, val);
-					break;
-				}
-				default:
-					panic("Unimplemented atomic instruction");
-			}
-			break;
-		}
-		case 0x33u: // integer register
-		{
-			uint32_t funct3 = (inst >> 12u) & 7u;
-			uint32_t rd = (inst >> 7u) & 31u;
-			uint32_t rs1 = (inst >> 15u) & 31u;
-			uint32_t rs2 = (inst >> 20u) & 31u;
-			uint32_t funct7 = inst >> 25u;
-
-			switch((funct3 << 8u) | funct7)
-			{
-				case 0x000u: // add
-					setReg(rd, getReg(rs1) + getReg(rs2));
-					break;
-				case 0x001u: // mul
-					setReg(rd, getReg(rs1) * getReg(rs2));
-					break;
-				case 0x020u: // sub
-					setReg(rd, getReg(rs1) - getReg(rs2));
-					break;
-				case 0x100u: // sll
-					setReg(rd, getReg(rs1) << (getReg(rs2) & 63u));
-					break;
-				case 0x101u: // mulh
-					setReg(rd, (__int128_t(int64_t(getReg(rs1))) * __int128_t(int64_t(getReg(rs2)))) >> 64);
-					break;
-				case 0x200u: // slt
-					setReg(rd, int64_t(getReg(rs1)) < int64_t(getReg(rs2)) ? 1u : 0u);
-					break;
-				case 0x201u: // mulhsu
-					setReg(rd, (__int128_t(int64_t(getReg(rs1))) * __uint128_t(getReg(rs2))) >> 64);
-					break;
-				case 0x300u: // sltu
-					setReg(rd, (getReg(rs1) < getReg(rs2)) ? 1u : 0u);
-					break;
-				case 0x301u: // mulhu
-					setReg(rd, (__uint128_t(getReg(rs1)) * __uint128_t(getReg(rs2))) >> 64);
-					break;
-				case 0x400u: // xor
-					setReg(rd, getReg(rs1) ^ getReg(rs2));
-					break;
-				case 0x401u: // div
-				    if (getReg(rs2) == 0)
-						setReg(rd, ~uint64_t(0));
-					else if (int64_t(getReg(rs1)) == INT64_MIN && int64_t(getReg(rs2)) == -1)
-						setReg(rd, uint64_t(INT64_MIN));
-					else
-						setReg(rd, int64_t(getReg(rs1)) / int64_t(getReg(rs2)));
-
-					break;
-				case 0x500u: // srl
-					setReg(rd, getReg(rs1) >> (getReg(rs2) & 63u));
-					break;
-				case 0x501u: // divu
-				    if (getReg(rs2) == 0)
-						setReg(rd, ~uint64_t(0));
-					else
-						setReg(rd, getReg(rs1) / getReg(rs2));
-
-					break;
-				case 0x520u: // sra
-					setReg(rd, int64_t(getReg(rs1)) >> (getReg(rs2) & 63u));
-					break;
-				case 0x600u: // or
-					setReg(rd, getReg(rs1) | getReg(rs2));
-					break;
-				case 0x601u: // rem
-					// TODO: Signedness correct?
-				    if (getReg(rs2) == 0)
-						setReg(rd, getReg(rs1));
-					else if (int64_t(getReg(rs1)) == INT64_MIN && int64_t(getReg(rs2)) == -1)
-						setReg(rd, 0);
-					else
-						setReg(rd, int64_t(getReg(rs1)) % int64_t(getReg(rs2)));
-					break;
-				case 0x700u: // and
-					setReg(rd, getReg(rs1) & getReg(rs2));
-					break;
-				case 0x701u: // remu
-				    if (getReg(rs2) == 0)
-						setReg(rd, getReg(rs1));
-					else
-						setReg(rd, getReg(rs1) % getReg(rs2));
-					break;
-				default:
-					panic("Unknown reg-reg instruction");
-			}
-			break;
-		}
-		case 0x37u: // lui
-		{
-			uint32_t rd = (inst >> 7u) & 0x1Fu;
-			setReg(rd, int64_t(int32_t(inst & 0xFFFFF000u)));
-			break;
-		}
-		case 0x3Bu: // integer register (RV64)
-		{
-			uint32_t funct3 = (inst >> 12u) & 7u;
-			uint32_t rd = (inst >> 7u) & 31u;
-			uint32_t rs1 = (inst >> 15u) & 31u;
-			uint32_t rs2 = (inst >> 20u) & 31u;
-			uint32_t funct7 = inst >> 25u;
-
-			switch((funct3 << 8u) | funct7)
-			{
-				case 0x000u: // addw
-					setReg(rd, int64_t(int32_t(getReg(rs1)) + int32_t(getReg(rs2))));
-					break;
-				case 0x001u: // mulw
-					setReg(rd, int64_t(int32_t(getReg(rs1)) * int32_t(getReg(rs2))));
-					break;
-				case 0x020u: // subw
-					setReg(rd, int64_t(int32_t(getReg(rs1)) - int32_t(getReg(rs2))));
-					break;
-				case 0x100u: // sllw
-					setReg(rd, int64_t(int32_t(getReg(rs1)) << (getReg(rs2) & 31u)));
-					break;
-				case 0x401u: // divw
-				    if (uint32_t(getReg(rs2)) == 0)
-						setReg(rd, ~uint64_t(0));
-					else if (int32_t(getReg(rs1)) == INT32_MIN && int32_t(getReg(rs2)) == -1)
-						setReg(rd, int64_t(INT32_MIN));
-					else
-						setReg(rd, int64_t(int32_t(getReg(rs1)) / int32_t(getReg(rs2))));
-					break;
-				case 0x500u: // srlw
-					setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1)) >> (getReg(rs2) & 31u))));
-					break;
-				case 0x501u: // divuw
-				    if (uint32_t(getReg(rs2)) == 0)
-						setReg(rd, ~uint64_t(0));
-					else
-						setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1)) / uint32_t(getReg(rs2)))));
-					break;
-				case 0x520u: // sraw
-					setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1))) >> (getReg(rs2) & 31u)));
-					break;
-				case 0x601u: // remw
-				    if (uint32_t(getReg(rs2)) == 0)
-						setReg(rd, int64_t(int32_t(getReg(rs1))));
-					else if (int32_t(getReg(rs1)) == INT32_MIN && int32_t(getReg(rs2)) == -1)
-						setReg(rd, 0);
-					else
-						setReg(rd, int64_t(int32_t(int32_t(getReg(rs1)) % int32_t(getReg(rs2)))));
-					break;
-				case 0x701u: // remuw
-				    if (uint32_t(getReg(rs2)) == 0)
-						setReg(rd, int64_t(int32_t(getReg(rs1))));
-					else
-						setReg(rd, int64_t(int32_t(uint32_t(getReg(rs1)) % uint32_t(getReg(rs2)))));
-					break;
-				default:
-					panic("Unknown 32-bit reg-reg instruction");
-			}
-			break;
-		}
-		case 0x43u: // FP
-		case 0x53u: // FP
-		{
-			if (faultOnFSOff(inst))
-				continue;
-
-			printf("Unknown FP instruction %x\n", inst);
-			break;
-		}
-		case 0x63u: // branch
-		{
-			uint32_t funct3 = (inst >> 12u) & 7u;
-			uint32_t rs1 = (inst >> 15u) & 31u;
-			uint32_t rs2 = (inst >> 20u) & 31u;
-			int64_t rs1vals = int64_t(getReg(rs1));
-			int64_t rs2vals = int64_t(getReg(rs2));
-			uint64_t rs1valu = getReg(rs1);
-			uint64_t rs2valu = getReg(rs2);
-			uint32_t imm12 = inst >> 31u;
-			uint32_t imm105 = (inst >> 25u) & 0x3fu;
-			uint32_t imm41 = (inst >> 8u) & 0xfu;
-			uint32_t imm11 = (inst >> 7u) & 0x1u;
-			int32_t imm = int32_t(((imm12 << 12u) | (imm11 << 11u) | (imm105 << 5u) | (imm41 << 1u)) << 19u) >> 19u;
-			bool take = false;
-			switch (funct3)
-			{
-				case 0u: // beq
-					take = rs1valu == rs2valu;
-					break;
-				case 1u: // bne
-					take = rs1valu != rs2valu;
-					break;
-				case 4u: // blt
-					take = rs1vals < rs2vals;
-					break;
-				case 5u: // bge
-					take = rs1vals >= rs2vals;
-					break;
-				case 6u: // bltu
-					take = rs1valu < rs2valu;
-					break;
-				case 7u: // bgeu
-					take = rs1valu >= rs2valu;
-					break;
-				default:
-					panic("Unsupported branch");
-			}
-			if (take) {
-				hart->pc += imm;
-				continue;
-			}
-			break;
-		}
-		case 0x67u: // jalr
-		{
-			uint32_t rd = (inst >> 7u) & 0x1Fu;
-			uint32_t rs1 = (inst >> 15u) & 31u;
-			int32_t imm = int32_t(inst) >> 20u;
-
-			uint64_t retaddr = hart->pc + 4u;
-			hart->pc = getReg(rs1) + imm;
-			setReg(rd, retaddr);
-			continue;
-		}
-		case 0x6fu: // jal
-		{
-			uint32_t rd = (inst >> 7u) & 0x1Fu;
-			uint32_t imm20 = inst >> 31u;
-			uint32_t imm101 = (inst >> 21u) & 0x3FFu;
-			uint32_t imm11 = (inst >> 20u) & 1u;
-			uint32_t imm1912 = (inst >> 12u) & 0xFFu;
-			int32_t imm = int32_t(((imm20 << 20u) | (imm1912 << 12u) | (imm11 << 11u) | (imm101 << 1u)) << 11u) >> 11u;
-			setReg(rd, hart->pc + 4u);
-			hart->pc += imm;
-			continue;
-		}
-		case 0x73u: // SYSTEM
-		{
-			uint32_t funct3 = (inst >> 12u) & 0x7u;
-			switch(funct3)
-			{
-			case 0u: // Misc stuff
-			{
-				if (inst == 0x00000073u) { // ecall
-					if (hart->mode == Hart::MODE_SUPERVISOR)
-						handleSBICall(hart);
-					else {
-						hart->handleInterrupt(Hart::SCAUSE_ECALL_UMODE, 0);
-						continue;
-					}
-				} else if (inst == 0x00100073u) { // ebreak
-					if (hart->regs[10] == 3) { // semihosting putc
-						uint8_t ch;
-						if (virtRead(getReg(11), &ch))
-							putchar(ch);
-						else
-							panic("Fault during semihost putc");
-						break;
-					}
-					panic("ebreak");
-				} else if ((inst & 0b1111111'00000'00000'111'11111'1111111) == 0b0001001'00000'00000'000'00000'1110011) {
-					//printf("Doing some fencing\n");
-				} else if (inst == 0x10200073) {
-					hart->handleSRET();
-					hart->handlePendingInterrupts();
-					continue;
-				} else if (inst == 0x10500073) { // wfi
-					//asm ("hlt");
-					break;
-				} else
-					panic("Unsupported misc instruction");
-
-				break;
-			}
-			case 1u: // CSRRW
-			{
-				uint16_t csr = inst >> 20u;
-				unsigned int rd = (inst >> 7u) & 31u;
-				unsigned int rs1 = (inst >> 15u) & 31u;
-				uint64_t rs1val = getReg(rs1);
-
-				if (rd != 0u) // No getCSR side effect if rd is zero
-					setReg(rd, getCSR(csr));
-
-				setCSR(csr, rs1val);
-				break;
-			}
-			case 2u: // CSRRS
-			{
-				uint16_t csr = inst >> 20u;
-				unsigned int rd = (inst >> 7u) & 31u;
-				unsigned int rs1 = (inst >> 15u) & 31u;
-				uint64_t csrval = getCSR(csr);
-				uint64_t rs1val = getReg(rs1);
-				setReg(rd, getCSR(csr));
-
-				if (rs1 != 0) // No setCSR side effect if rs1 is zero
-					setCSR(csr, csrval | rs1val);
-
-				break;
-			}
-			case 3u: // CSRRC
-			{
-				uint16_t csr = inst >> 20u;
-				unsigned int rd = (inst >> 7u) & 31u;
-				unsigned int rs1 = (inst >> 15u) & 31u;
-				uint64_t csrval = getCSR(csr);
-				uint64_t rs1val = getReg(rs1);
-				setReg(rd, getCSR(csr));
-
-				if (rs1 != 0) // No setCSR side effect if rs1 is zero
-					setCSR(csr, csrval & ~rs1val);
-
-				break;
-			}
-			case 5u: // CSRRWI
-			{
-				uint16_t csr = inst >> 20u;
-				unsigned int rd = (inst >> 7u) & 31u;
-				if (rd != 0u) // No getCSR side effect if rd is zero
-					setReg(rd, getCSR(csr));
-
-				uint64_t imm = (inst >> 15u) & 31u;
-				setCSR(csr, imm);
-				break;
-			}
-			case 6u: // CSRRSI
-			{
-				uint16_t csr = inst >> 20u;
-				unsigned int rd = (inst >> 7u) & 31u;
-				uint64_t imm = (inst >> 15u) & 31u;
-				uint64_t csrval = getCSR(csr);
-				setReg(rd, csrval);
-				setCSR(csr, csrval | imm);
-				break;
-			}
-			case 7u: // CSRRCI
-			{
-				uint16_t csr = inst >> 20u;
-				unsigned int rd = (inst >> 7u) & 31u;
-				uint64_t imm = (inst >> 15u) & 31u;
-				uint64_t csrval = getCSR(csr);
-				setReg(rd, csrval);
-				setCSR(csr, csrval & ~imm);
-				break;
-			}
-			default:
-				panic("Unknown SYSTEM instruction");
-			}
-
-			// Immediately check for interrupts
-			hart->pc += 4;
-			hart->handlePendingInterrupts();
-			continue;
-		}
-		default:
-			panic("Unknown instruction %08x", inst);
-		}
-
-		hart->pc += 4;
+		runInstruction(inst);
 	}
 }
