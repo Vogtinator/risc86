@@ -416,11 +416,11 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		uint8_t flags_limit;
 		uint8_t base_hi;
 	} gdt[] = {
-	    {},
-	    { .limit_lo = 0xFFFF, .access = 0b10011011, .flags_limit = 0b10101111 }, // Ring 0 CS
-	    { .limit_lo = 0xFFFF, .access = 0b10010011, .flags_limit = 0b10001111 }, // Ring 0 DS
-	    { .limit_lo = 0xFFFF, .access = 0b11111011, .flags_limit = 0b10101111 }, // Ring 3 CS
-	    { .limit_lo = 0xFFFF, .access = 0b11110011, .flags_limit = 0b10001111 }, // Ring 3 DS
+		[0] = {},
+		[SegmentKernelCS] = { .limit_lo = 0xFFFF, .access = 0b10011011, .flags_limit = 0b10101111 }, // Ring 0 CS
+		[SegmentKernelDS] = { .limit_lo = 0xFFFF, .access = 0b10010011, .flags_limit = 0b10001111 }, // Ring 0 DS
+		[SegmentUserCS] = { .limit_lo = 0xFFFF, .access = 0b11111011, .flags_limit = 0b10101111 }, // Ring 3 CS
+		[SegmentUserDS] = { .limit_lo = 0xFFFF, .access = 0b11110011, .flags_limit = 0b10001111 }, // Ring 3 DS
 	};
 
 	struct {

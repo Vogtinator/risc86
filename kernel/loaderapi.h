@@ -11,6 +11,14 @@ static const uint64_t
 	KERNEL_PHYS_START = 0xFFFF900000000000UL,
 	KERNEL_PHYS_END   = 0xFFFFA00000000000UL;
 
+// Segments defined by the GDT
+enum GDTSegment {
+	SegmentKernelCS = 1,
+	SegmentKernelDS,
+	SegmentUserCS,
+	SegmentUserDS,
+};
+
 enum MemoryRegionType {
 	MemRegionFree = 0, // Free for any purposse
 	MemRegionPayload,  // Used for passed kernel and initrd, must be preserved
