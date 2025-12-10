@@ -406,6 +406,35 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	if (EFI_ERROR(Status))
 		return Status;
 
+	// Set up GDT
+#pragma pack(push, 1)
+	static struct {
+		uint16_t limit_lo;
+		uint16_t base_lo;
+		uint8_t base_mid;
+		uint8_t access;
+		uint8_t flags_limit;
+		uint8_t base_hi;
+	} gdt[] = {
+	    {},
+	    { .limit_lo = 0xFFFF, .access = 0b10011011, .flags_limit = 0b10101111 }, // Ring 0 CS
+	    { .limit_lo = 0xFFFF, .access = 0b10010011, .flags_limit = 0b10001111 }, // Ring 0 DS
+	    { .limit_lo = 0xFFFF, .access = 0b11111011, .flags_limit = 0b10101111 }, // Ring 3 CS
+	    { .limit_lo = 0xFFFF, .access = 0b11110011, .flags_limit = 0b10001111 }, // Ring 3 DS
+	};
+
+	struct {
+		uint16_t limit;
+		uintptr_t pointer;
+	} gdtp = {
+		.limit = sizeof(gdt) - 1,
+		.pointer = (uintptr_t) &gdt,
+	};
+#pragma pack(pop)
+
+	asm volatile("lgdt %[gdtp]" :: [gdtp] "m" (gdtp));
+	// Reloading of segment registers not needed here
+
 	// Enable some CPU features
 	uint64_t cr4;
 	__asm volatile("mov %%cr4, %[cr4]\n" : [cr4] "=r" (cr4));
