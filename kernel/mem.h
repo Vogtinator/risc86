@@ -52,3 +52,4 @@ private:
 };
 
 extern PhysMemMgr physMemMgr;
+extern KernelParams kernel_params;

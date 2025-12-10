@@ -5,6 +5,7 @@
 #include "utils.h"
 
 PhysMemMgr physMemMgr;
+KernelParams kernel_params;
 
 void PhysMemMgr::addRegion(PhysAddr start, PhysAddr end, MemoryRegionType type)
 {

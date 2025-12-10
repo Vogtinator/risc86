@@ -5,8 +5,6 @@
 #include "sbi.h"
 #include "utils.h"
 
-extern KernelParams kernel_params;
-
 void Hart::handleInterrupt(uint64_t cause, uint64_t stval)
 {
 	this->scause = cause;

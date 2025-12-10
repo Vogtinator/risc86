@@ -4,8 +4,6 @@
 #include "devicetree.h"
 #include "loaderapi.h"
 
-extern KernelParams kernel_params;
-
 PhysAddr buildDeviceTreeBlob()
 {
 	const size_t dtb_maxsize = 8 * 1024;

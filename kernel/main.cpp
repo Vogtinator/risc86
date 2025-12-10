@@ -10,8 +10,6 @@
 #include "percpu.h"
 #include "utils.h"
 
-KernelParams kernel_params;
-
 extern "C" __attribute__((noreturn)) __attribute__((section(".text.entry")))
 void kernel_entry(KernelParams *params)
 {
