@@ -1,4 +1,11 @@
 c_args = ['-ffreestanding', '-nostdlib']
+
+# This could be avoided by having a separate stack for interrupts,
+# (while avoiding recursive ones), but that's annoying to set up (TSS etc.)
+c_args += ['-mno-red-zone']
+
+c_args += ['-DUACPI_BAREBONES_MODE']
+
 cpp_args = c_args + ['-fno-exceptions', '-fno-rtti']
 
 # TODO: Is there a better way?
@@ -45,9 +52,19 @@ libfdt_a = static_library(
 
 libfdt = declare_dependency(include_directories: [libfdt_path], link_with: libfdt_a)
 
+libuacpi_a = static_library(
+    'uacpi',
+    sources: uacpi.get_variable('sources'),
+    include_directories: uacpi.get_variable('includes'),
+    c_args: c_args,
+)
+
+libuacpi = declare_dependency(include_directories: [uacpi.get_variable('includes')], link_with: libuacpi_a)
+
 kernel = executable(
     'kernel',
     sources: [
+        'acpi.cpp',
         'devicetree.cpp',
         'hart.cpp',
         'main.cpp',
@@ -62,5 +79,5 @@ kernel = executable(
     pie: true,
     link_args: link_args,
     link_depends: [link_script],
-    dependencies: [newlib, libfdt],
+    dependencies: [newlib, libfdt, libuacpi],
 )

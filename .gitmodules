@@ -1,3 +1,6 @@
 [submodule "dtc"]
 	path = dtc
 	url = https://github.com/dgibson/dtc.git
+[submodule "subprojects/uACPI"]
+	path = subprojects/uACPI
+	url = https://github.com/uACPI/uACPI

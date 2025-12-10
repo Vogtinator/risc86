@@ -19,7 +19,7 @@ static struct KernelParams params = { 0 };
 
 void *memcpy(void *target, void *src, size_t len)
 {
-	uint8_t *target8 = target, *src8 = src;;
+	uint8_t *target8 = target, *src8 = src;
 	while(len--) *target8++ = *src8++;
 
 	return target;
@@ -32,6 +32,18 @@ void *memset(void *ptr, uint8_t val, size_t len)
 		*ptr8++ = val;
 
 	return ptr;
+}
+
+int memcmp(void *a, void *b, size_t len)
+{
+	uint8_t *a8 = a, *b8 = b;
+	while(len--) {
+		int diff = *a8++ - *b8++;
+		if (diff != 0)
+			return diff;
+	}
+
+	return 0;
 }
 
 static EFI_SYSTEM_TABLE *ST = NULL;
@@ -284,6 +296,18 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 			memcpy((void*) (params.fb.phys + (y + line) * params.fb.pitch + x * 4),
 			       (void*) (&logo[line * LOGO_SIZE * 4]), LOGO_SIZE * 4);
 		}
+	}
+
+	// Find the ACPI XSDP
+	for (unsigned int i = 0; i < SystemTable->NumberOfTableEntries; ++i) {
+		EFI_CONFIGURATION_TABLE *t = &SystemTable->ConfigurationTable[i];
+		if (memcmp(&t->VendorGuid, &((EFI_GUID) ACPI_20_TABLE_GUID), sizeof(t->VendorGuid)) == 0)
+			params.xsdp_phys = (EFI_PHYSICAL_ADDRESS) t->VendorTable;
+	}
+
+	if (!params.xsdp_phys) {
+		ST->ConOut->OutputString(ST->ConOut, L"ACPI XSDP not found\r\n");
+		return EFI_UNSUPPORTED;
 	}
 
 	// Load kernel and initrd

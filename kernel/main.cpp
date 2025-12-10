@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+#include "acpi.h"
 #include "devicetree.h"
 #include "hart.h"
 #include "loaderapi.h"
@@ -37,6 +38,8 @@ void kernel_entry(KernelParams *params)
 	// and some invalid pointers are more obvious. TODO: Or is it fine if the DTB
 	// just lives there?
 	physMemMgr.allocate(4096, MemRegionZeroPage);
+
+	setupACPI();
 
 	printf("Free mem: %lu MiB\n", physMemMgr.totalFreeBytes() / 1024 / 1024);
 

@@ -12,5 +12,6 @@ if meson.get_compiler('c').get_id() != 'clang'
     error('Add `--native-file clang.txt` when setting up')
 endif
 
+uacpi = subproject('uACPI')
 subdir('kernel')
 subdir('efiloader')

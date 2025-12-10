@@ -34,6 +34,7 @@ struct KernelParams {
 		uint64_t phys;
 		uint32_t width, height, pitch, bpp;
 	} fb;
+	uint64_t xsdp_phys;
 	size_t memory_region_count;
 	struct {
 		uint64_t start, size;
