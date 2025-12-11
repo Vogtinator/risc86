@@ -67,6 +67,7 @@ kernel = executable(
         'acpi.cpp',
         'devicetree.cpp',
         'hart.cpp',
+        'hpet.cpp',
         'main.cpp',
         'mem.cpp',
         'newlib_stubs.cpp',

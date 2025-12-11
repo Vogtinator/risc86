@@ -6,6 +6,7 @@
 #include "acpi.h"
 #include "devicetree.h"
 #include "hart.h"
+#include "hpet.h"
 #include "loaderapi.h"
 #include "mem.h"
 #include "percpu.h"
@@ -40,6 +41,8 @@ void kernel_entry(KernelParams *params)
 	physMemMgr.allocate(4096, MemRegionZeroPage);
 
 	setupACPI();
+
+	setupHPET();
 
 	printf("Free mem: %lu MiB\n", physMemMgr.totalFreeBytes() / 1024 / 1024);
 

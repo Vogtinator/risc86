@@ -1,5 +1,6 @@
 #include <stdio.h>
 
+#include "hpet.h"
 #include "loaderapi.h"
 #include "rvmmu.h"
 #include "sbi.h"
@@ -53,11 +54,9 @@ void Hart::handleSRET()
 	this->pc = this->sepc;
 }
 
-uint64_t Hart::global_time = 0;
-
 void Hart::handlePendingInterrupts()
 {
-	if (global_time >= this->stimecmp)
+	if (hpetCurrentTime() >= this->stimecmp)
 		this->sip |= SIP_STIP;
 	else
 		this->sip &= ~SIP_STIP;
@@ -211,7 +210,7 @@ uint64_t Hart::getCSR(uint16_t csr)
 	case 0x180u:
 		return this->satp;
 	case 0xc01u:
-		return global_time;
+		return hpetCurrentTime();
 	default:
 		panic("Unknown CSR read 0x%03x", csr);
 	}
@@ -1467,8 +1466,7 @@ void Hart::run()
 	for(;;)
 	{
 		static uint32_t counter = 0;
-		if ((counter++ % 1024) == 0) {
-			global_time += 16;
+		if ((counter++ % (1<<10)) == 0) {
 			this->handlePendingInterrupts();
 		}
 

@@ -2,6 +2,7 @@
 #include <libfdt.h>
 
 #include "devicetree.h"
+#include "hpet.h"
 #include "loaderapi.h"
 
 PhysAddr buildDeviceTreeBlob()
@@ -38,7 +39,7 @@ PhysAddr buildDeviceTreeBlob()
 	const int cpus_ofs = fdt_add_subnode(dt_virt, root_ofs, "cpus");
 	fdt_setprop_u32(dt_virt, cpus_ofs, "#address-cells", 1);
 	fdt_setprop_u32(dt_virt, cpus_ofs, "#size-cells", 0);
-	fdt_setprop_u32(dt_virt, cpus_ofs, "timebase-frequency", 1 * 1024 * 1024); // TODO
+	fdt_setprop_u32(dt_virt, cpus_ofs, "timebase-frequency", hpetFrequency());
 
 	// TODO: SMP
 	for (int ncpu = 0; ncpu < 1; ++ncpu) {
