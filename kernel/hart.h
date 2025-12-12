@@ -55,6 +55,7 @@ struct Hart {
 	uint64_t stval;
 	uint64_t satp;
 	uint64_t stimecmp;
+	uint64_t stopi;
 
 	void dump();
 	void run();

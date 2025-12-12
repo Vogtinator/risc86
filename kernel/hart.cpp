@@ -61,14 +61,16 @@ void Hart::handlePendingInterrupts()
 	else
 		this->sip &= ~SIP_STIP;
 
-	if((this->sstatus & SSTATUS_SIE) || this->mode == Hart::MODE_USER)
-	{
-		uint64_t ipend = this->sip & this->sie;
-		if(ipend & SIP_STIP)
-			handleInterrupt(Hart::SCAUSE_INTERRUPT_BASE + 5, 0); // IRQ 5
-		else if (ipend)
-			panic("Unknown interrupt pending");
+	uint64_t ipend = this->sip & this->sie;
+
+	if (!ipend) {
+		this->stopi = 0;
+		return;
 	}
+
+	this->stopi = ((__builtin_ctz(ipend)) << 16) | 1;
+	if((this->sstatus & SSTATUS_SIE) || this->mode == Hart::MODE_USER)
+		handleInterrupt(Hart::SCAUSE_INTERRUPT_BASE + this->stopi, 0);
 }
 
 
@@ -211,6 +213,8 @@ uint64_t Hart::getCSR(uint16_t csr)
 		return this->satp;
 	case 0xc01u:
 		return hpetCurrentTime();
+	case 0xdb0u:
+		return this->stopi;
 	default:
 		panic("Unknown CSR read 0x%03x", csr);
 	}
