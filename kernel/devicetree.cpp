@@ -46,7 +46,7 @@ PhysAddr buildDeviceTreeBlob()
 		char cpu_nodename[] = "cpu@XXX";
 		snprintf(cpu_nodename, sizeof(cpu_nodename), "cpu@%d", ncpu);
 		const int cpu_ofs = fdt_add_subnode(dt_virt, cpus_ofs, cpu_nodename);
-		fdt_setprop_string(dt_virt, cpu_ofs, "device-type", "cpu");
+		fdt_setprop_string(dt_virt, cpu_ofs, "device_type", "cpu");
 		fdt_setprop_u32(dt_virt, cpu_ofs, "reg", ncpu);
 		fdt_setprop_string(dt_virt, cpu_ofs, "status", "okay");
 		fdt_setprop_string(dt_virt, cpu_ofs, "compatible", "riscv");
