@@ -9,8 +9,8 @@
 #define HPET_REG_CONF 0x010
 #define HPET_REG_INT 0x020
 #define HPET_REG_VAL 0x0F0
-#define HPET_REG_TIMER_CONF(x) 0x100+X*0x20
-#define HPET_REG_TIMER_COMP(x) 0x108+X*0x20
+#define HPET_REG_TIMER_CONF(x) 0x100+x*0x20
+#define HPET_REG_TIMER_COMP(x) 0x108+x*0x20
 
 static volatile uint64_t *hpetRegs;
 
