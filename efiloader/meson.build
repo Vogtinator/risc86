@@ -65,6 +65,7 @@ touch "$1"
 qemu = find_program('qemu-system-x86_64')
 qemu_args = [
     '-accel', 'kvm',
+    '-M', 'q35',
     '-cpu', 'host',
     '-m', '4G',
     '-chardev', 'stdio,mux=on,id=out',
