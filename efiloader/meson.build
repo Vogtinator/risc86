@@ -71,7 +71,6 @@ qemu_args = [
     '-chardev', 'stdio,mux=on,id=out',
     '-serial', 'chardev:out',
     '-device', 'isa-debugcon,chardev=out',
-    '-monitor', 'none',
     '-no-reboot',
     '-bios', '/usr/share/qemu/ovmf-x86_64.bin',
     '-drive', 'file=fat:' + qemu_esp_dir + ',readonly=on,if=virtio',
