@@ -1455,7 +1455,9 @@ void Hart::runInstruction(uint32_t inst)
 
 		// Immediately check for interrupts
 		this->pc += 4;
-		this->handlePendingInterrupts();
+		// TODO: Commented out for now to avoid slow HPET access...
+		// Ideally do this only when writing interrupt related CSRs.
+		//this->handlePendingInterrupts();
 		return;
 	}
 	default:
@@ -1470,7 +1472,7 @@ void Hart::run()
 	for(;;)
 	{
 		static uint32_t counter = 0;
-		if ((counter++ % (1<<10)) == 0) {
+		if ((counter++ % (1<<20)) == 0) {
 			this->handlePendingInterrupts();
 		}
 
