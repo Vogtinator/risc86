@@ -10,6 +10,7 @@
 #define SSTATUS_FS_MASK (3ul << 13)
 
 #define SIP_STIP (1ull << 5)
+#define SIP_SEIP (1ull << 9)
 
 struct Hart {
 	// regs[0] is always 0, never written to
@@ -64,7 +65,7 @@ struct Hart {
 	// IMSIC CSRs (indirect)
 	uint64_t eidelivery; // Only & 1 supported
 	uint64_t eithreshold;
-	uint64_t eip[1], eie[1];
+	uint64_t eip_64[1], eie_64[1]; // 64 bits, so there is no eip1, eip3, ...
 
 	void dump();
 	void run();

@@ -3,6 +3,7 @@
 
 #include "x86interrupts.h"
 #include "mem.h"
+#include "percpu.h"
 #include "uacpi/acpi.h"
 #include "uacpi/tables.h"
 #include "utils.h"
@@ -18,10 +19,34 @@ struct InterruptFrame
 	uint64_t ss;
 };
 
+// x86 can't use vectors 0-31 for external interrupts,
+// so shift RISC-V interrupts by 32.
+__attribute__((no_caller_saved_registers))
+static uint8_t x86IRQtoRVExtIRQ(uint8_t x86IRQ)
+{
+	// TODO: Kernel patched to not need shifting.
+	return x86IRQ;
+	//return x86IRQ - 32;
+}
+
+static uint8_t rvExtIRQtoX86IRQ(unsigned int rvIRQ)
+{
+	if (rvIRQ < 32 || rvIRQ >= 256)
+		panic("Invalid RV IRQ %d", rvIRQ);
+
+	// TODO: Kernel patched to not need shifting.
+	return rvIRQ;
+	//return x86IRQ + 32;
+}
+
 __attribute__((no_caller_saved_registers))
 static void irqHandler(InterruptFrame *frame, int irq)
 {
-	panic("IRQ %d at 0x%lx", irq, frame->ip);
+	auto rvExtIRQ = x86IRQtoRVExtIRQ(irq);
+	if (rvExtIRQ / 64 >= sizeof(Hart::eip_64)/sizeof(Hart::eip_64[0]))
+		panic("Unexpected IRQ %d", irq);
+
+	getPerCPU()->hart.eip_64[rvExtIRQ / 64] |= 1ul << (rvExtIRQ % 64);
 }
 
 // x86 calls a different handler for each interrupt vector,
@@ -135,4 +160,14 @@ void setupInterrupts()
 	lapicWrite(0xF0, 0x1FF);
 
 	asm volatile("sti");
+}
+
+void markRVInterruptHandled(unsigned int rvExtIRQ)
+{
+	unsigned int x86IRQ = rvExtIRQ;
+
+	getPerCPU()->hart.eip_64[rvExtIRQ / 64] &= ~(1ul << (rvExtIRQ % 64));
+
+	// TODO: How to ensure there's no race?
+	lapicWrite(0xB0, 0x00);
 }

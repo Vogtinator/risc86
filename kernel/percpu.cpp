@@ -24,6 +24,7 @@ void setupPerCPUState(unsigned int cpu_id)
 	asm volatile("wrmsr" :: "a" (ptr_lo), "d" (ptr_hi), "c" (0xc0000100) : "memory");
 }
 
+__attribute__((no_caller_saved_registers))
 PerCpuState *getPerCPU()
 {
 	PerCpuState *ret;

@@ -5,6 +5,7 @@
 #include "rvmmu.h"
 #include "sbi.h"
 #include "utils.h"
+#include "x86interrupts.h"
 
 void Hart::handleInterrupt(uint64_t cause, uint64_t stval)
 {
@@ -56,11 +57,35 @@ void Hart::handleSRET()
 
 void Hart::handlePendingInterrupts()
 {
+	// Supervisor timer interrupt
 	if (hpetCurrentTime() >= this->stimecmp)
 		this->sip |= SIP_STIP;
 	else
 		this->sip &= ~SIP_STIP;
 
+	// IMSIC external interrupts
+	int extInt = -1;
+	// Find lowest pending external interrupt
+	for (unsigned int i = 0; i < sizeof(this->eip_64) / sizeof(this->eip_64[0]); ++i) {
+		auto iepend = this->eip_64[i] & this->eie_64[i];
+		if (iepend) {
+			extInt = i * 64 + __builtin_ctzg(iepend);
+			break;
+		}
+	}
+
+	// Check if the ext IRQ is lower than eithreshold
+	if (extInt > 0 && (this->eithreshold == 0 || uint64_t(extInt) < this->eithreshold))
+		this->stopei = (extInt << 16) | extInt;
+	else
+		this->stopei = 0; // TODO: What about extInt == 0?
+
+	if (this->stopei && this->eidelivery == 1)
+		this->sip |= SIP_SEIP;
+	else
+		this->sip &= ~SIP_SEIP;
+
+	// Hart interrupt handling
 	uint64_t ipend = this->sip & this->sie;
 
 	if (!ipend) {
@@ -68,7 +93,7 @@ void Hart::handlePendingInterrupts()
 		return;
 	}
 
-	auto hartInterrupt = __builtin_ctz(ipend);
+	auto hartInterrupt = __builtin_ctzg(ipend);
 	this->stopi = (hartInterrupt << 16) | 1;
 	if((this->sstatus & SSTATUS_SIE) || this->mode == Hart::MODE_USER)
 		handleInterrupt(Hart::SCAUSE_INTERRUPT_BASE + hartInterrupt, 0);
@@ -211,14 +236,16 @@ uint64_t Hart::getCSR(uint16_t csr)
 	case 0x143u:
 		return this->stval;
 	case 0x151u: { // sireg -> indirect CSRs
-		auto numEIRegs = sizeof(this->eie) / sizeof(this->eie[0]);
+		auto numEIRegs = sizeof(this->eie_64) / sizeof(this->eie_64[0]) * 2;
 		auto numEIReg = this->siselect & 63;
-		if (this->siselect >= 0xC0 && numEIReg < numEIRegs) // eie0-eie63
-			return this->eie[numEIReg];
+		if (this->siselect >= 0xC0 && numEIReg < numEIRegs && !(numEIReg & 1)) // eie0-eie63
+			return this->eie_64[numEIReg / 2];
 
 		panic("Unknown indirect CSR read 0x%lx", this->siselect);
 		return 0;
 	}
+	case 0x15c:
+		return this->stopei;
 	case 0x180u:
 		return this->satp;
 	case 0xc01u:
@@ -267,21 +294,25 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 		this->siselect = value;
 		return;
 	case 0x151u: { // sireg -> indirect CSRs
-		auto numEIRegs = sizeof(this->eie) / sizeof(this->eie[0]);
+		auto numEIRegs = sizeof(this->eie_64) / sizeof(this->eie_64[0]) * 2;
 		auto numEIReg = this->siselect & 63;
 		if (this->siselect == 0x70) {
 			if (value == 0 || value == 1)
 				this->eidelivery = value;
 		} else if (this->siselect == 0x72) {
 			this->eithreshold = value;
-		} else if (this->siselect >= 0xC0 && numEIReg < numEIRegs) { // eie0-eie63
-			this->eie[numEIReg] = value;
+		} else if (this->siselect >= 0xC0 && numEIReg < numEIRegs && !(numEIReg & 1)) { // eie0-eie63
+			this->eie_64[numEIReg / 2] = value;
 		} else
 			panic("Unknown indirect CSR write 0x%lx", this->siselect);
 
 		break;
 	}
-	case 0x180u:
+	case 0x15c: {
+		markRVInterruptHandled(this->stopei >> 16);
+		this->stopei = 0;
+		break;
+	} case 0x180u:
 		if ((value >> 60) == 0 || (value >> 60) == 8) // Only bare or Sv39
 			this->satp = value;
 		else

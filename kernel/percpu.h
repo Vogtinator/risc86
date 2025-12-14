@@ -13,4 +13,5 @@ struct PerCpuState {
 };
 
 void setupPerCPUState(unsigned int cpu_id);
+__attribute__((no_caller_saved_registers))
 PerCpuState *getPerCPU();
