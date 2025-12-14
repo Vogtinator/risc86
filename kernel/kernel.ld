@@ -17,6 +17,10 @@ SECTIONS
 		*(.data*)
 		*(.rodata)
 		*(.rodata*)
+		. = ALIGN(8);
+		_init_array_start = .;
+		*(.init_array)
+		_init_array_end = .;
 		*(.bss*)
 	}
 }

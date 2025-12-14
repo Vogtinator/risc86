@@ -13,11 +13,24 @@
 #include "percpu.h"
 #include "utils.h"
 
+// Run global constructors defined in .init_array.
+// _init_array_{start,end} are provided by kernel.ld.
+using Constructor = void(*)(void);
+extern "C" { extern Constructor _init_array_start[], _init_array_end; }
+
+static void runGlobalConstructors()
+{
+	for(int i = 0; uintptr_t(&_init_array_start[i]) < uintptr_t(&_init_array_end); ++i)
+		_init_array_start[i]();
+}
+
 extern "C" __attribute__((noreturn)) __attribute__((section(".text.entry")))
 void kernel_entry(KernelParams *params)
 {
 	kernel_params = *params;
 	puts("Starting kernel...");
+
+	runGlobalConstructors();
 
 	// Set up per-CPU state for the boot CPU
 	setupPerCPUState(0);
