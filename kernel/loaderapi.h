@@ -13,10 +13,10 @@ static const uint64_t
 
 // Segments defined by the GDT
 enum GDTSegment {
-	SegmentKernelCS = 1,
-	SegmentKernelDS,
-	SegmentUserCS,
-	SegmentUserDS,
+	SegmentKernelCS = 0x8,
+	SegmentKernelDS = 0x10,
+	SegmentUserCS = 0x18,
+	SegmentUserDS = 0x20,
 };
 
 enum MemoryRegionType {
