@@ -68,9 +68,10 @@ void Hart::handlePendingInterrupts()
 		return;
 	}
 
-	this->stopi = ((__builtin_ctz(ipend)) << 16) | 1;
+	auto hartInterrupt = __builtin_ctz(ipend);
+	this->stopi = (hartInterrupt << 16) | 1;
 	if((this->sstatus & SSTATUS_SIE) || this->mode == Hart::MODE_USER)
-		handleInterrupt(Hart::SCAUSE_INTERRUPT_BASE + this->stopi, 0);
+		handleInterrupt(Hart::SCAUSE_INTERRUPT_BASE + hartInterrupt, 0);
 }
 
 
