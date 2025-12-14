@@ -9,6 +9,7 @@
 #include "hpet.h"
 #include "loaderapi.h"
 #include "mem.h"
+#include "pci.h"
 #include "percpu.h"
 #include "utils.h"
 
@@ -41,6 +42,8 @@ void kernel_entry(KernelParams *params)
 	physMemMgr.allocate(4096, MemRegionZeroPage);
 
 	setupACPI();
+
+	PCI::setupPCI();
 
 	setupHPET();
 

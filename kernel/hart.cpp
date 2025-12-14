@@ -209,6 +209,15 @@ uint64_t Hart::getCSR(uint16_t csr)
 		return this->scause;
 	case 0x143u:
 		return this->stval;
+	case 0x151u: { // sireg -> indirect CSRs
+		auto numEIRegs = sizeof(this->eie) / sizeof(this->eie[0]);
+		auto numEIReg = this->siselect & 63;
+		if (this->siselect >= 0xC0 && numEIReg < numEIRegs) // eie0-eie63
+			return this->eie[numEIReg];
+
+		panic("Unknown indirect CSR read 0x%lx", this->siselect);
+		return 0;
+	}
 	case 0x180u:
 		return this->satp;
 	case 0xc01u:
@@ -253,6 +262,24 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 	case 0x14du:
 		this->stimecmp = value;
 		return;
+	case 0x150u:
+		this->siselect = value;
+		return;
+	case 0x151u: { // sireg -> indirect CSRs
+		auto numEIRegs = sizeof(this->eie) / sizeof(this->eie[0]);
+		auto numEIReg = this->siselect & 63;
+		if (this->siselect == 0x70) {
+			if (value == 0 || value == 1)
+				this->eidelivery = value;
+		} else if (this->siselect == 0x72) {
+			this->eithreshold = value;
+		} else if (this->siselect >= 0xC0 && numEIReg < numEIRegs) { // eie0-eie63
+			this->eie[numEIReg] = value;
+		} else
+			panic("Unknown indirect CSR write 0x%lx", this->siselect);
+
+		break;
+	}
 	case 0x180u:
 		if ((value >> 60) == 0 || (value >> 60) == 8) // Only bare or Sv39
 			this->satp = value;

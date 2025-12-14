@@ -55,7 +55,16 @@ struct Hart {
 	uint64_t stval;
 	uint64_t satp;
 	uint64_t stimecmp;
+
+	// AIA CSRs
 	uint64_t stopi;
+	uint64_t stopei;
+	uint64_t siselect;
+
+	// IMSIC CSRs (indirect)
+	uint64_t eidelivery; // Only & 1 supported
+	uint64_t eithreshold;
+	uint64_t eip[1], eie[1];
 
 	void dump();
 	void run();

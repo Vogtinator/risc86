@@ -4,6 +4,8 @@
 #include "devicetree.h"
 #include "hpet.h"
 #include "loaderapi.h"
+#include "pci.h"
+#include "percpu.h"
 
 PhysAddr buildDeviceTreeBlob()
 {
@@ -24,7 +26,7 @@ PhysAddr buildDeviceTreeBlob()
 
 	// Chosen node
 	const int chosen_ofs = fdt_add_subnode(dt_virt, root_ofs, "chosen");
-	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "debug loglevel=9 earlycon=smh console=tty security=selinux systemd.log_level=debug systemd.log_target=console linuxrc.log=/dev/console linuxrc.debug=1 systemd.log_level=debug");
+	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "debug loglevel=9 earlycon=sbi console=hvc0 security=selinux systemd.log_level=debug systemd.log_target=console linuxrc.log=/dev/console linuxrc.debug=1 systemd.log_level=debug pci=realloc");
 	// TODO: Fill that randomly (using rdrand/rdseed?)
 	for(uint32_t i : (uint32_t[]){0xe3c3d5c1u, 0x67270453u, 0x27a09781u, 0xa54ed241u,
 	                              0x66d189d4u, 0x24efaf2fu, 0xf887c4d7u, 0xec6a7c2bu})
@@ -40,6 +42,8 @@ PhysAddr buildDeviceTreeBlob()
 	fdt_setprop_u32(dt_virt, cpus_ofs, "#address-cells", 1);
 	fdt_setprop_u32(dt_virt, cpus_ofs, "#size-cells", 0);
 	fdt_setprop_u32(dt_virt, cpus_ofs, "timebase-frequency", hpetFrequency());
+
+	uint32_t cpu_intc_phandles[MAX_CPUS] = {};
 
 	// TODO: SMP
 	for (int ncpu = 0; ncpu < 1; ++ncpu) {
@@ -57,9 +61,63 @@ PhysAddr buildDeviceTreeBlob()
 		fdt_setprop_string(dt_virt, cpu_ofs, "mmu-type", "riscv,sv39");
 
 		const int cpu_intc_ofs = fdt_add_subnode(dt_virt, cpu_ofs, "interrupt-controller");
+		fdt_generate_phandle(dt_virt, &cpu_intc_phandles[ncpu]);
+		fdt_setprop_u32(dt_virt, cpu_intc_ofs, "phandle", cpu_intc_phandles[ncpu]);
 		fdt_setprop_u32(dt_virt, cpu_intc_ofs, "#interrupt-cells", 1);
 		fdt_setprop_string(dt_virt, cpu_intc_ofs, "compatible", "riscv,cpu-intc");
 		fdt_setprop_empty(dt_virt, cpu_intc_ofs, "interrupt-controller");
+	}
+
+	// Add LAPIC as IMSIC :D
+	const int imsic_ofs = fdt_add_subnode(dt_virt, root_ofs, "lapic");
+	uint32_t imsic_phandle;
+	fdt_generate_phandle(dt_virt, &imsic_phandle);
+	fdt_setprop_u32(dt_virt, imsic_ofs, "phandle", imsic_phandle);
+	fdt_setprop_string(dt_virt, imsic_ofs, "compatible", "riscv,imsics");
+	fdt_setprop_empty(dt_virt, imsic_ofs, "interrupt-controller");
+	fdt_setprop_u32(dt_virt, imsic_ofs, "#interrupt-cells", 0);
+	fdt_setprop_empty(dt_virt, imsic_ofs, "msi-controller");
+	fdt_setprop_u32(dt_virt, imsic_ofs, "#msi-cells", 0);
+	fdt_appendprop_u64(dt_virt, imsic_ofs, "reg", 0xFEE00000ul);
+	fdt_appendprop_u64(dt_virt, imsic_ofs, "reg", 0x1000ul);
+	fdt_setprop_u32(dt_virt, imsic_ofs, "riscv,num-ids", 63);
+	for (int ncpu = 0; ncpu < 1; ++ncpu) {
+		fdt_appendprop_u32(dt_virt, imsic_ofs, "interrupts-extended", cpu_intc_phandles[ncpu]);
+		fdt_appendprop_u32(dt_virt, imsic_ofs, "interrupts-extended", 9);
+	}
+
+	// Mention all PCIe controllers
+	for (uint32_t i = 0; i < PCI::numControllers; ++i) {
+		auto *controller = &PCI::controllers[i];
+		char pcie_nodename[] = "pcie@XXXXXXXXXXXXXXXX";
+		snprintf(pcie_nodename, sizeof(pcie_nodename), "pcie@%lx", controller->ecam);
+		const int pcie_ofs = fdt_add_subnode(dt_virt, root_ofs, pcie_nodename);
+		fdt_setprop_string(dt_virt, pcie_ofs, "compatible", "pci-host-ecam-generic");
+		fdt_setprop_string(dt_virt, pcie_ofs, "device_type", "pci");
+		fdt_setprop_u32(dt_virt, pcie_ofs, "#address-cells", 3);
+		fdt_setprop_u32(dt_virt, pcie_ofs, "#interrupt-cells", 1);
+		fdt_setprop_u32(dt_virt, pcie_ofs, "#size-cells", 2);
+		fdt_setprop_u32(dt_virt, pcie_ofs, "msi-parent", imsic_phandle);
+		fdt_appendprop_u32(dt_virt, pcie_ofs, "bus-range", controller->startBus);
+		fdt_appendprop_u32(dt_virt, pcie_ofs, "bus-range", controller->endBus);
+		fdt_appendprop_u64(dt_virt, pcie_ofs, "reg", controller->ecam);
+		fdt_appendprop_u64(dt_virt, pcie_ofs, "reg", (controller->endBus + 1) << 20);
+
+		for (uint32_t r = 0; r < controller->numRanges; ++r) {
+			auto *range = &controller->ranges[r];
+			uint32_t flags = 0;
+			if (range->prefetchable)
+				flags |= 1 << 30;
+			if (range->is64bit)
+				flags |= 0b11 << 24;
+			else
+				flags |= 0b10 << 24;
+
+			fdt_appendprop_u32(dt_virt, pcie_ofs, "ranges", flags);
+			fdt_appendprop_u64(dt_virt, pcie_ofs, "ranges", range->start);
+			fdt_appendprop_u64(dt_virt, pcie_ofs, "ranges", range->start);
+			fdt_appendprop_u64(dt_virt, pcie_ofs, "ranges", range->size);
+		}
 	}
 
 	if (kernel_params.fb.phys) {

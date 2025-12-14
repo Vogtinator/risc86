@@ -71,6 +71,7 @@ kernel = executable(
         'main.cpp',
         'mem.cpp',
         'newlib_stubs.cpp',
+        'pci.cpp',
         'percpu.cpp',
         'rvmmu.cpp',
         'sbi.cpp',
