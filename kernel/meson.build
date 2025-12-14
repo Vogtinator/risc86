@@ -76,6 +76,7 @@ kernel = executable(
         'rvmmu.cpp',
         'sbi.cpp',
         'utils.cpp',
+        'x86interrupts.cpp',
     ],
     cpp_args: cpp_args,
     pie: true,

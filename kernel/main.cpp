@@ -12,6 +12,7 @@
 #include "pci.h"
 #include "percpu.h"
 #include "utils.h"
+#include "x86interrupts.h"
 
 // Run global constructors defined in .init_array.
 // _init_array_{start,end} are provided by kernel.ld.
@@ -57,6 +58,8 @@ void kernel_entry(KernelParams *params)
 	setupACPI();
 
 	PCI::setupPCI();
+
+	setupInterrupts();
 
 	setupHPET();
 
