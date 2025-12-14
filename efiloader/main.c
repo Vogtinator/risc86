@@ -456,8 +456,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	};
 #pragma pack(pop)
 
-	asm volatile("lgdt %[gdtp]" :: [gdtp] "m" (gdtp));
-	// Reloading of segment registers not needed here
+	//asm volatile("lgdt %[gdtp]" :: [gdtp] "m" (gdtp));
+	// TODO: Reload segment registers and iret to the kernel
 
 	// Enable some CPU features
 	uint64_t cr4;
