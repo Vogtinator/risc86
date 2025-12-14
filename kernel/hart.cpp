@@ -221,6 +221,10 @@ uint64_t Hart::getCSR(uint16_t csr)
 {
 	// TODO: Permission checks
 	switch (csr) {
+	case 0x001u: // fflags pseudo reg
+		return this->fcsr & 0b11111;
+	case 0x002u: // frm pseudo reg
+		return (this->fcsr >> 5) & 0b111;
 	case 0x003u:
 		return this->fcsr;
 	case 0x100u:
@@ -263,6 +267,14 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 {
 	// TODO: Permission checks
 	switch (csr) {
+	case 0x001u: // fflags pseudo reg
+		this->fcsr &= ~0b11111ul;
+		this->fcsr |= value & 0b11111;
+		return;
+	case 0x002u: // frm pseudo reg
+		this->fcsr &= ~(0b111ul << 5);
+		this->fcsr |= (value & 0b111) << 5;
+		return;
 	case 0x003u:
 		this->fcsr = value;
 		return;
