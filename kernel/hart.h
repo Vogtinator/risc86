@@ -23,7 +23,8 @@ struct Hart {
 		// 32-bit floats are NaN-boxed as 64-bit double,
 		// represented by writing ~0 to the upper 32 bits.
 		float f;
-		struct { uint32_t low, high; } u;
+		struct { uint32_t low, high; } w;
+		uint64_t x;
 	} fregs[32];
 	uint64_t fcsr;
 
@@ -105,21 +106,9 @@ private:
 			this->regs[r] = value;
 	}
 
-	inline double getDReg(int r)
-	{
-		if ((this->sstatus & SSTATUS_FS_MASK) == 0)
-			panic("getDReg called with FS off!");
-
-		return this->fregs[r].d;
-	}
-
-	inline void setDReg(int r, double value)
-	{
-		setFSDirty();
-		this->fregs[r].d = value;
-	}
-
-	inline float getFReg(int r)
+	// Templated getters and setters for floating-point registers
+	template <typename T> T getFReg(int r);
+	template <> float getFReg(int r)
 	{
 		if ((this->sstatus & SSTATUS_FS_MASK) == 0)
 			panic("getFReg called with FS off!");
@@ -127,11 +116,25 @@ private:
 		return this->fregs[r].f;
 	}
 
-	inline void setFReg(int r, float value)
+	template <> double getFReg(int r)
+	{
+		if ((this->sstatus & SSTATUS_FS_MASK) == 0)
+			panic("getDReg called with FS off!");
+
+		return this->fregs[r].d;
+	}
+
+	template <typename T> void setFReg(int r, T value);
+	template <> void setFReg(int r, float value)
 	{
 		setFSDirty();
 		this->fregs[r].f = value;
-		this->fregs[r].u.high = ~0u;
+		this->fregs[r].w.high = ~0u;
+	}
+	template <> void setFReg(int r, double value)
+	{
+		setFSDirty();
+		this->fregs[r].d = value;
 	}
 
 	bool faultOnFSOff(uint32_t inst);

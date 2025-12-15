@@ -194,11 +194,20 @@ void Hart::dump()
 		i++;
 	}
 
+	// Print float/double regs
+	for (int i = 0; i < 32;)
+	{
+		printf("F%02d: %016lx (%04e) ", i, this->fregs[i].x, this->fregs[i].w.high == ~0u ? this->fregs->f : this->fregs->d);
+		i++;
+		printf("F%02d: %016lx (%04e)\n", i, this->fregs[i].x, this->fregs[i].w.high == ~0u ? this->fregs->f : this->fregs->d);
+		i++;
+	}
+
 	// Print CSRs
 	struct { uint64_t *ptr; const char *name; } csrs[] = {
 #define REG(x) { &this->x, # x }
 		REG(sstatus), REG(stvec), REG(sip), REG(sie), REG(sscratch),
-		REG(sepc), REG(scause), REG(stval), REG(satp),
+		REG(sepc), REG(scause), REG(stval), REG(satp), REG(stimecmp)
 #undef REG
 	};
 
@@ -470,7 +479,7 @@ void Hart::runRVCInstruction(uint16_t inst)
 		if (!virtRead(getReg(rs1) + off, &value))
 			return;
 
-		setDReg(rd, value);
+		setFReg<double>(rd, value);
 	} else if ((inst & 0b111'000'000'00'000'11) == 0b010'000'000'00'000'00) { // c.lw
 		uint16_t imm53 = (inst >> 10) & 7,
 		        imm2  = (inst >>  6) & 1,
@@ -521,7 +530,7 @@ void Hart::runRVCInstruction(uint16_t inst)
 		uint32_t rs1 = ((inst >> 7) & 7) + 8,
 		        rs2 = ((inst >> 2) & 7) + 8;
 
-		if (!virtWrite<double>(getReg(rs1) + off, getDReg(rs2)))
+		if (!virtWrite<double>(getReg(rs1) + off, getFReg<double>(rs2)))
 			return;
 	} else if ((inst & 0b111'1'00000'11111'11) == 0b100'0'00000'00000'10) { // c.jr (before c.mv)
 		uint32_t rs1 = (inst >> 7) & 0x1F;
@@ -571,7 +580,7 @@ void Hart::runRVCInstruction(uint16_t inst)
 
 		uint32_t rs2 = (inst >> 2) & 31;
 
-		if (!virtWrite(getReg(2) + off, getDReg(rs2)))
+		if (!virtWrite(getReg(2) + off, getFReg<double>(rs2)))
 			return;
 	} else if ((inst & 0b111'000000'00000'11) == 0b110'000000'00000'10) { // c.swsp
 		uint16_t imm52 = (inst >>  9) & 0xF,
@@ -619,7 +628,7 @@ void Hart::runRVCInstruction(uint16_t inst)
 		if (!virtRead(getReg(2) + off, &value))
 			return;
 
-		setDReg(rd, value);
+		setFReg(rd, value);
 	} else if ((inst & 0b111'0'00000'00000'11) == 0b010'0'00000'00000'10) { // c.lwsp
 		uint16_t imm5  = (inst >> 12) & 1,
 		        imm42 = (inst >>  4) & 7,
@@ -816,7 +825,7 @@ void Hart::runInstruction(uint32_t inst)
 			if (!virtRead(addr, &val))
 				return;
 
-			setDReg(rd, val);
+			setFReg(rd, val);
 			break;
 		}
 		default:
@@ -956,7 +965,7 @@ void Hart::runInstruction(uint32_t inst)
 			if (faultOnFSOff(inst))
 				return;
 
-			if (!virtWrite(addr, getFReg(rs2)))
+			if (!virtWrite(addr, getFReg<float>(rs2)))
 				return;
 			break;
 		}
@@ -964,7 +973,7 @@ void Hart::runInstruction(uint32_t inst)
 			if (faultOnFSOff(inst))
 				return;
 
-			if (!virtWrite(addr, getDReg(rs2)))
+			if (!virtWrite(addr, getFReg<double>(rs2)))
 				return;
 			break;
 		}
