@@ -137,6 +137,35 @@ private:
 		this->fregs[r].d = value;
 	}
 
+	uint32_t getFRegBitsFloat(int r)
+	{
+		if ((this->sstatus & SSTATUS_FS_MASK) == 0)
+			panic("getDReg called with FS off!");
+
+		return this->fregs[r].w.low;
+	}
+
+	uint64_t getFRegBitsDouble(int r)
+	{
+		if ((this->sstatus & SSTATUS_FS_MASK) == 0)
+			panic("getDReg called with FS off!");
+
+		return this->fregs[r].x;
+	}
+
+	void setFRegBitsFloat(int r, uint32_t value)
+	{
+		setFSDirty();
+		this->fregs[r].w.low = value;
+		this->fregs[r].w.high = ~0u;
+	}
+
+	void setFRegBitsDouble(int r, uint64_t value)
+	{
+		setFSDirty();
+		this->fregs[r].x = value;
+	}
+
 	bool faultOnFSOff(uint32_t inst);
 	uint64_t getCSR(uint16_t csr);
 	void setCSR(uint16_t csr, uint64_t value);

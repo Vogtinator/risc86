@@ -1343,13 +1343,112 @@ void Hart::runInstruction(uint32_t inst)
 		}
 		break;
 	}
-	case 0x43u: // FP
+	case 0x43u: // FMADD
+	case 0x47u: // FMSUB
+	case 0x4Bu: // FNMSUB
+	case 0x4Fu: // FNMADD
+	{
+		if (faultOnFSOff(inst))
+			return;
+
+		uint32_t op = (inst >> 2u) & 3u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rm = (inst >> 12u) & 7u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		uint32_t funct2 = (inst >> 25u) & 0b11;
+		uint32_t rs3 = (inst >> 27u) & 31u;
+
+		// Operations common to doubles and floats are deduplicated using this templated lambda.
+		// Return true if instruction executed.
+		auto commonStuff = [&] <typename T> (bool isDouble) {
+		    uint32_t doublebit = isDouble ? 0b1 : 0b0;
+		   if (op == 0b00 && funct2 == doublebit) { // FMADD.{S,D}
+		       setFReg<T>(rd, getFReg<T>(rs1) * getFReg<T>(rs2) + getFReg<T>(rs3));
+		    } else
+		        return false;
+
+		    return true;
+		};
+
+		if (commonStuff.operator()<float>(false) || commonStuff.operator()<double>(true))
+			break;
+		else
+			panic("Unknown FP instruction %x\n", inst);
+
+		break;
+	}
 	case 0x53u: // FP
 	{
 		if (faultOnFSOff(inst))
 			return;
 
-		printf("Unknown FP instruction %x\n", inst);
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rm = (inst >> 12u) & 7u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		uint32_t funct7 = inst >> 25u;
+
+		// Operations common to doubles and floats are deduplicated using this templated lambda.
+		// Return true if instruction executed.
+		auto commonStuff = [&] <typename T> (bool isDouble) {
+		    uint32_t doublebit = isDouble ? 0b1 : 0b0;
+		    if (funct7 == (0b0001000 | doublebit)) { // FMUL.{S,D}
+		        setFReg<T>(rd, getFReg<T>(rs1) * getFReg<T>(rs2));
+		    } else if (funct7 == (0b0001100 | doublebit)) { // FDIV.{S,D}
+		        setFReg<T>(rd, getFReg<T>(rs1) / getFReg<T>(rs2));
+		    } else if (funct7 == (0b0000000 | doublebit)) { // FADD.{S,D}
+		        setFReg<T>(rd, getFReg<T>(rs1) + getFReg<T>(rs2));
+		    } else if (funct7 == (0b0000100 | doublebit)) { // FSUB.{S,D}
+		        setFReg<T>(rd, getFReg<T>(rs1) - getFReg<T>(rs2));
+		    } else if (funct7 == (0b1010000 | doublebit)) {
+		        if (rm == 0b000) // FLE.{S,D}
+		            setReg(rd, getFReg<T>(rs1) <= getFReg<T>(rs2));
+		        else if (rm == 0b001) // FLT.{S,D}
+		            setReg(rd, getFReg<T>(rs1) < getFReg<T>(rs2));
+		        else if (rm == 0b010) // FEQ.{S,D}
+		            setReg(rd, getFReg<T>(rs1) == getFReg<T>(rs2));
+		        else
+		            return false;
+		    } else if (funct7 == (0b1100000 | doublebit) && rs2 == 0b00000) { // FCVT.W.{S,D}
+		       setReg(rd, int32_t(getFReg<T>(rs1)));
+		   } else if (funct7 == (0b1100000 | doublebit) && rs2 == 0b00001) { // FCVT.WU.{S,D}
+		       setReg(rd, uint32_t(getFReg<T>(rs1)));
+		   } else if (funct7 == (0b1100000 | doublebit) && rs2 == 0b00010) { // FCVT.L.{S,D}
+		       setReg(rd, int64_t(getFReg<T>(rs1)));
+		   } else if (funct7 == (0b1100000 | doublebit) && rs2 == 0b00011) { // FCVT.LU.{S,D}
+		       setReg(rd, uint64_t(getFReg<T>(rs1)));
+		   } else if (funct7 == (0b1101000 | doublebit) && rs2 == 0b00000) { // FCVT.{S,D}.W
+		       setFReg<T>(rd, int32_t(getReg(rs1)));
+		   } else if (funct7 == (0b1101000 | doublebit) && rs2 == 0b00001) { // FCVT.{S,D}.WU
+		       setFReg<T>(rd, uint32_t(getReg(rs1)));
+		   } else if (funct7 == (0b1101000 | doublebit) && rs2 == 0b00010) { // FCVT.{S,D}.L
+		       setFReg<T>(rd, int64_t(getReg(rs1)));
+		   } else if (funct7 == (0b1101000 | doublebit) && rs2 == 0b00011) { // FCVT.{S,D}.LU
+		       setFReg<T>(rd, uint64_t(getReg(rs1)));
+		   } else
+		        return false;
+
+		    return true;
+		};
+
+		if (commonStuff.operator()<float>(false) || commonStuff.operator()<double>(true)) {
+			break;
+		} else if (funct7 == 0b0100000 && rs2 == 0b00001) { // FCVT.S.D
+			setFReg<float>(rd, getFReg<double>(rs1));
+		} else if (funct7 == 0b0100001 && rs2 == 0b00000) { // FCVT.D.S
+			setFReg<double>(rd, getFReg<float>(rs1));
+		} else if (funct7 == 0b1110001 && rs2 == 0b00000 && rm == 0b000) { // FMV.X.D
+			setReg(rd, this->fregs[rs1].x);
+		} else if (funct7 == 0b1111001 && rs2 == 0b00000 && rm == 0b000) { // FMV.D.X
+			setFRegBitsDouble(rd, getReg(rs1));
+		} else if (funct7 == 0b0010000 && rm == 0b000) { // FSGNJ.S
+			setFRegBitsFloat(rd, (getFRegBitsFloat(rs2) & (1u << 31)) | (getFRegBitsFloat(rs1) & ~(1u << 31)));
+		} else if (funct7 == 0b0010001 && rm == 0b000) { // FSGNJ.D
+			setFRegBitsDouble(rd, (getFRegBitsDouble(rs2) & (1ul << 63)) | (getFRegBitsDouble(rs1) & ~(1ul << 63)));
+		} else
+			panic("Unknown FP instruction %x\n", inst);
+
 		break;
 	}
 	case 0x63u: // branch
