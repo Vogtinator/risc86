@@ -21,7 +21,7 @@ custom_prefix = meson.current_source_dir() / '../prefix/usr/local/x86_64-pc-none
 
 newlib = declare_dependency(
     compile_args: ['-isystem' + custom_prefix / 'include'],
-    link_args: ['-L' + custom_prefix / 'lib', '-lc'],
+    link_args: ['-L' + custom_prefix / 'lib', '-lc', '-lm'],
 )
 
 libfdt_path = '../dtc/libfdt'
