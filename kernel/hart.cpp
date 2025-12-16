@@ -1381,7 +1381,7 @@ void Hart::runInstruction(uint32_t inst)
 		if (commonStuff.operator()<float>() || commonStuff.operator()<double>())
 			break;
 		else
-			printf("Unknown FP instruction %x\n", inst);
+			panic("Unknown FP instruction %x", inst);
 
 		break;
 	}
@@ -1419,6 +1419,10 @@ void Hart::runInstruction(uint32_t inst)
 					setReg(rd, getFReg<T>(rs1) == getFReg<T>(rs2));
 				else
 					return false;
+			} else if (funct7 == (0b0010100 | doublebit) && rm == 0b000) { // FMIN.{S,D}
+				setFReg<T>(rd, min(getFReg<T>(rs1), getFReg<T>(rs2)));
+			} else if (funct7 == (0b0010100 | doublebit) && rm == 0b001) { // FMAX.{S,D}
+				setFReg<T>(rd, max(getFReg<T>(rs1), getFReg<T>(rs2)));
 			} else if (funct7 == (0b1100000 | doublebit) && rs2 == 0b00000) { // FCVT.W.{S,D}
 				setReg(rd, int32_t(getFReg<T>(rs1)));
 			} else if (funct7 == (0b1100000 | doublebit) && rs2 == 0b00001) { // FCVT.WU.{S,D}
@@ -1493,7 +1497,7 @@ void Hart::runInstruction(uint32_t inst)
 			uint64_t sign = (getFRegBitsDouble(rs2) & (1ul << 63)) ^ (getFRegBitsDouble(rs1) & (1ul << 63));
 			setFRegBitsDouble(rd, sign | (getFRegBitsDouble(rs1) & ~(1ul << 63)));
 		} else
-			printf("Unknown FP instruction %x\n", inst);
+			panic("Unknown FP instruction %x", inst);
 
 		break;
 	}
