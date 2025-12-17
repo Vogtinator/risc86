@@ -56,10 +56,12 @@ void Hart::handleSRET()
 	this->pc = this->sepc;
 }
 
+uint64_t Hart::global_time = 0;
+
 void Hart::handlePendingInterrupts()
 {
 	// Supervisor timer interrupt
-	if (hpetCurrentTime() >= this->stimecmp)
+	if (global_time >= this->stimecmp)
 		this->sip |= SIP_STIP;
 	else
 		this->sip &= ~SIP_STIP;
@@ -264,7 +266,7 @@ uint64_t Hart::getCSR(uint16_t csr)
 	case 0x180u:
 		return this->satp;
 	case 0xc01u:
-		return hpetCurrentTime();
+		return global_time;
 	case 0xdb0u:
 		return this->stopi;
 	default:
@@ -1686,7 +1688,7 @@ void Hart::runInstruction(uint32_t inst)
 		this->pc += 4;
 		// TODO: Commented out for now to avoid slow HPET access...
 		// Ideally do this only when writing interrupt related CSRs.
-		//this->handlePendingInterrupts();
+		this->handlePendingInterrupts();
 		return;
 	}
 	default:
@@ -1701,7 +1703,8 @@ void Hart::run()
 	for(;;)
 	{
 		static uint32_t counter = 0;
-		if ((counter++ % (1<<20)) == 0) {
+		if ((counter++ % 1024) == 0) {
+			global_time += 16;
 			this->handlePendingInterrupts();
 		}
 

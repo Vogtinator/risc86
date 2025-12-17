@@ -61,7 +61,7 @@ void kernel_entry(KernelParams *params)
 
 	setupInterrupts();
 
-	setupHPET();
+	//setupHPET();
 
 	printf("Free mem: %lu MiB\n", physMemMgr.totalFreeBytes() / 1024 / 1024);
 
