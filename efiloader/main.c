@@ -322,15 +322,17 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	if (!pml4)
 		return EFI_OUT_OF_RESOURCES;
 
-	// Allocate stack
-	EFI_PHYSICAL_ADDRESS stackPhys = (EFI_PHYSICAL_ADDRESS) allocPages(KERNEL_STACK_SIZE / PAGE_SIZE, EfiLoaderData);
-	if (!stackPhys)
-		return EFI_OUT_OF_RESOURCES;
+	// Allocate stacks (TODO: Do it in kernel instead?)
+	for (int cpu = 0; cpu < MAX_CPUS; ++cpu) {
+		EFI_PHYSICAL_ADDRESS stackPhys = (EFI_PHYSICAL_ADDRESS) allocPages(KERNEL_STACK_SIZE / PAGE_SIZE, EfiLoaderData);
+		if (!stackPhys)
+			return EFI_OUT_OF_RESOURCES;
 
-	// Map stack
-	Status = mmap(stackPhys, KERNEL_STACK_LOW, KERNEL_STACK_SIZE, PT_NOEXEC | PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
-	if (EFI_ERROR(Status))
-		return Status;
+		// Map stack
+		Status = mmap(stackPhys, KERNEL_STACK_LOW + cpu * KERNEL_STACK_CPU_OFFSET, KERNEL_STACK_SIZE, PT_NOEXEC | PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
+		if (EFI_ERROR(Status))
+			return Status;
+	}
 
 	// Map kernel
 	Status = mmap((EFI_PHYSICAL_ADDRESS) &kernel, KERNEL_LOAD_ADDR, (sizeof(kernel) + 0xFFF) & ~0xFFFULL, PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);

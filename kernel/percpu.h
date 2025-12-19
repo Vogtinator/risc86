@@ -1,8 +1,7 @@
 #pragma once
 
 #include "hart.h"
-
-#define MAX_CPUS 1
+#include "loaderapi.h"
 
 // There is one instance of this struct per cpu.
 // The PerCpuState for a CPU can always be accessed

@@ -109,9 +109,14 @@ static IDTEntry idt[] = {
 static PhysAddr lapicPhys = 0;
 static volatile uint32_t *lapic = nullptr;
 
-static void lapicWrite(uint32_t offset, uint32_t value)
+void lapicWrite(uint32_t offset, uint32_t value)
 {
 	lapic[offset / 4] = value;
+}
+
+uint32_t lapicRead(uint32_t offset)
+{
+	return lapic[offset / 4];
 }
 
 static void outb(uint16_t port, uint8_t value)

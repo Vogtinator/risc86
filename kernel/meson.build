@@ -75,6 +75,7 @@ kernel = executable(
         'percpu.cpp',
         'rvmmu.cpp',
         'sbi.cpp',
+        'smp.cpp',
         'utils.cpp',
         'x86interrupts.cpp',
     ],

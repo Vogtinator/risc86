@@ -11,6 +11,7 @@
 #include "mem.h"
 #include "pci.h"
 #include "percpu.h"
+#include "smp.h"
 #include "utils.h"
 #include "x86interrupts.h"
 
@@ -60,6 +61,8 @@ void kernel_entry(KernelParams *params)
 	PCI::setupPCI();
 
 	setupInterrupts();
+
+	setupSMP();
 
 	//setupHPET();
 
