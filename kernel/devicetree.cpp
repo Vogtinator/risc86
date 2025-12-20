@@ -120,7 +120,7 @@ PhysAddr buildDeviceTreeBlob()
 		}
 	}
 
-	if (kernel_params.fb.phys) {
+	if (kernel_params.fb.pitch) {
 		printf("Have framebuffer at %p\n", (void*)kernel_params.fb.phys);
 		int fb_ofs = fdt_add_subnode(dt_virt, root_ofs, "fb");
 		fdt_setprop_string(dt_virt, fb_ofs, "status", "okay");

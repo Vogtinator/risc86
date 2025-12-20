@@ -275,26 +275,22 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	Status = ST->BootServices->LocateProtocol(&gop_guid, NULL, (void**)&gop);
 	if (EFI_ERROR(Status)) {
 		ST->ConOut->OutputString(ST->ConOut, L"No GOP frame buffer available\r\n");
-		return Status;
-	}
-
-	if (gop->Mode->Info->PixelFormat != PixelBlueGreenRedReserved8BitPerColor) {
+	} else if (gop->Mode->Info->PixelFormat != PixelBlueGreenRedReserved8BitPerColor) {
 		ST->ConOut->OutputString(ST->ConOut, L"GOP format is unsupported\r\n");
-		return EFI_UNSUPPORTED;
-	}
+	} else {
+		params.fb.bpp = 32;
+		params.fb.phys = gop->Mode->FrameBufferBase;
+		params.fb.height = gop->Mode->Info->VerticalResolution;
+		params.fb.width = gop->Mode->Info->HorizontalResolution;
+		params.fb.pitch = gop->Mode->Info->PixelsPerScanLine * (params.fb.bpp / 8);
 
-	params.fb.bpp = 32;
-	params.fb.phys = gop->Mode->FrameBufferBase;
-	params.fb.height = gop->Mode->Info->VerticalResolution;
-	params.fb.width = gop->Mode->Info->HorizontalResolution;
-	params.fb.pitch = gop->Mode->Info->PixelsPerScanLine * (params.fb.bpp / 8);
-
-	// Blit logo to the center
-	if (params.fb.width >= LOGO_SIZE && params.fb.height >= LOGO_SIZE) {
-		const int x = (params.fb.width - LOGO_SIZE) / 2, y = (params.fb.height - LOGO_SIZE) / 2;
-		for (int line = 0; line < LOGO_SIZE; line++) {
-			memcpy((void*) (params.fb.phys + (y + line) * params.fb.pitch + x * 4),
-			       (void*) (&logo[line * LOGO_SIZE * 4]), LOGO_SIZE * 4);
+		// Blit logo to the center
+		if (params.fb.width >= LOGO_SIZE && params.fb.height >= LOGO_SIZE) {
+			const int x = (params.fb.width - LOGO_SIZE) / 2, y = (params.fb.height - LOGO_SIZE) / 2;
+			for (int line = 0; line < LOGO_SIZE; line++) {
+				memcpy((void*) (params.fb.phys + (y + line) * params.fb.pitch + x * 4),
+				       (void*) (&logo[line * LOGO_SIZE * 4]), LOGO_SIZE * 4);
+			}
 		}
 	}
 
