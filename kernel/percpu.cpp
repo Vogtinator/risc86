@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "percpu.h"
+#include "loaderapi.h"
 #include "utils.h"
 
 /* Per-CPU state handling: %fs is set up to point at the CPU's
@@ -30,4 +31,12 @@ PerCpuState *getPerCPU()
 	PerCpuState *ret;
 	asm volatile("mov %%fs:(0), %[ret]" : [ret] "=r" (ret));
 	return ret;
+}
+
+PerCpuState *getPerCPUForOtherCPU(unsigned int cpuNum)
+{
+	if (cpuNum >= MAX_CPUS)
+		panic("cpuNum %d >= MAX_CPUS (%d)", cpuNum, MAX_CPUS);
+
+	return &perCpuStates[cpuNum];
 }

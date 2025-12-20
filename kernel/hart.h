@@ -9,6 +9,7 @@
 #define SSTATUS_SPP (1ull << 8)
 #define SSTATUS_FS_MASK (3ul << 13)
 
+#define SIP_SSIP (1ull << 1)
 #define SIP_STIP (1ull << 5)
 #define SIP_SEIP (1ull << 9)
 
@@ -66,14 +67,24 @@ struct Hart {
 	// IMSIC CSRs (indirect)
 	uint64_t eidelivery; // Only & 1 supported
 	uint64_t eithreshold;
-	uint64_t eip_64[1], eie_64[1]; // 64 bits, so there is no eip1, eip3, ...
+	uint64_t eip_64[2], eie_64[2]; // 64 bits, so there is no eip1, eip3, ...
+
+	// The _Atomic variables here are written by other CPUs
+	// Same values as SBI HSM states
+	_Atomic enum class State {
+		STARTED = 0,
+		STOPPED = 1,
+		START_PENDING = 2,
+	} state = Hart::State::STOPPED;
+
+	_Atomic bool ipiRequested;
 
 	void dump();
 	void run();
 
 private:
 	// Until there's a real timer
-	static uint64_t global_time;
+	static _Atomic uint64_t global_time;
 
 	void handleInterrupt(uint64_t cause, uint64_t stval);
 	void handlePendingInterrupts();

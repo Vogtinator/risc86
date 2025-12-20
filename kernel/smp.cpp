@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "percpu.h"
 #include "mem.h"
 #include "smp.h"
 #include "uacpi/acpi.h"
@@ -9,11 +8,7 @@
 #include "utils.h"
 #include "x86interrupts.h"
 
-static uint8_t cpusFound = 0;
-
-static struct {
-	uint8_t cpuID, lapicID;
-} lapics[MAX_CPUS];
+static uint8_t cpuNumToLAPICID[MAX_CPUS];
 
 /* Getting secondary cores to run kernel code is not easy on x86.
  * When they receive the startup command, they jump to (vector & 0xFF) << 12
@@ -71,6 +66,19 @@ smp_trampoline_64_addr:
 smp_trampoline_64:
 # Finally, long mode!
 
+# Reload data segment registers
+mov $0x10, %ax
+mov %ax, %ds
+mov %ax, %es
+mov %ax, %fs
+mov %ax, %gs
+mov %ax, %ss
+
+# Enable some CPU features
+mov %cr4, %rax
+or $(1 << 9), %rax # Enable OSFXSR for XMM
+mov %rax, %cr4
+
 # Get the CPU's number into %edi
 xor %eax, %eax
 movabs $cpusOnline, %rbx
@@ -93,7 +101,7 @@ movabs $(0xFFFF800000000000UL), %rbx
 add %rbx, %rax
 mov %rax, %rsp
 
-# Jump to secondaryEntry. $edi is already set above.
+# Jump to secondaryEntry. %edi is already set above.
 movabs $secondaryEntry, %rax
 jmp *%rax
 
@@ -126,23 +134,44 @@ extern "C" {
 	// Incremented by each CPU that comes online (incl. CPU0, the BSP)
 	volatile uint32_t cpusOnline = 0;
 	// Called once long mode and stack are set up.
-	void secondaryEntry(unsigned int cpuNum);
+	static void secondaryEntry(unsigned int cpuNum);
 }
 
-void secondaryEntry(unsigned int cpuNum)
+// Return the LAPIC ID of the current CPU
+static uint8_t getLAPICID()
 {
-	printf("CPU %u is here\n", cpuNum);
-	asm volatile("hlt");
+	return lapicRead(0x020) >> 24;
 }
 
-void setupSMP()
+static void (*secondaryCallbackGlobal)(unsigned int cpuNum);
+
+__attribute__((used))
+static void secondaryEntry(unsigned int cpuNum)
 {
+	cpuNumToLAPICID[cpuNum] = getLAPICID();
+
+	secondaryCallbackGlobal(cpuNum);
+
+	printf("CPU %u done\n", cpuNum);
+	for (;;)
+		asm volatile("cli; hlt");
+}
+
+void SMP::setupSMP(void (secondaryCallback)(unsigned int cpuNum))
+{
+	secondaryCallbackGlobal = secondaryCallback;
+
 	// Iterate the MADT to find all LAPICS of online-able CPUs.
 	uacpi_table tbl;
 	if (uacpi_table_find_by_signature("APIC", &tbl) != UACPI_STATUS_OK)
 		panic("MADT not found");
 
 	acpi_madt *madt = reinterpret_cast<acpi_madt*>(tbl.ptr);
+
+	static struct {
+		uint8_t cpuID, lapicID;
+	} lapics[MAX_CPUS];
+	static uint8_t cpusFound = 0;
 
 	auto cb = [] (uacpi_handle user, acpi_entry_hdr *hdr) {
 		(void) user;
@@ -205,11 +234,13 @@ void setupSMP()
 
 	// The BSP is CPU 0
 	cpusOnline = 1;
+	cpuNumToLAPICID[0] = getLAPICID();
 
 	for (int i = 0; i < cpusFound; ++i) {
 		printf("LAPIC %x\n", lapics[i].lapicID);
-		// TODO: Get LAPIC ID of BSP
-		if (lapics[i].lapicID == 0) {
+
+		// Don't try to online the current CPU (BSP)
+		if (lapics[i].lapicID == cpuNumToLAPICID[0]) {
 			continue;
 		}
 
@@ -231,4 +262,36 @@ void setupSMP()
 
 	printf("Waiting for secondary CPUs to come online...\n");
 	while (cpusOnline < cpusFound) asm volatile("pause");
+
+	printf("%u CPUs online!\n", numberOfCPUs());
+}
+
+unsigned int SMP::numberOfCPUs()
+{
+	return cpusOnline;
+}
+
+uint64_t SMP::cpuNumToHartID(unsigned int cpuNum)
+{
+	return cpuNumToLAPICID[cpuNum];
+}
+
+int SMP::hartIDToCPUNum(uint64_t hartID)
+{
+	for (unsigned int cpuNum = 0; cpuNum < cpusOnline; ++cpuNum) {
+		if (cpuNumToHartID(cpuNum) == hartID)
+			return cpuNum;
+	}
+
+	return -1;
+}
+
+void SMP::sendIPI(uint64_t hartId)
+{
+	// Send IPI
+	lapicWrite(0x310, hartId << 24);
+	lapicWrite(0x300, (1 << 14) | X86_IRQ_IPI);
+
+	// Wait until sent
+	while (lapicRead(0x310) & (1 << 14)) asm volatile("pause");
 }

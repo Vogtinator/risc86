@@ -6,6 +6,7 @@
 #include "loaderapi.h"
 #include "pci.h"
 #include "percpu.h"
+#include "smp.h"
 
 PhysAddr buildDeviceTreeBlob()
 {
@@ -26,7 +27,8 @@ PhysAddr buildDeviceTreeBlob()
 
 	// Chosen node
 	const int chosen_ofs = fdt_add_subnode(dt_virt, root_ofs, "chosen");
-	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "debug loglevel=9 earlycon=sbi console=hvc0 security=selinux systemd.log_level=debug systemd.log_target=console linuxrc.log=/dev/console linuxrc.debug=1 systemd.log_level=debug pci=realloc");
+	// TODO: Instead of irqchip.riscv_imsic_noipi, implement IMSIC IPIs
+	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "loglevel=9 earlycon=sbi console=hvc0 security=selinux systemd.log_target=console linuxrc.log=/dev/console linuxrc.debug=1 pci=realloc rw root=/dev/vdb2 init=/usr/lib/systemd/systemd irqchip.riscv_imsic_noipi");
 	// TODO: Fill that randomly (using rdrand/rdseed?)
 	for(uint32_t i : (uint32_t[]){0xe3c3d5c1u, 0x67270453u, 0x27a09781u, 0xa54ed241u,
 	                              0x66d189d4u, 0x24efaf2fu, 0xf887c4d7u, 0xec6a7c2bu})
@@ -45,13 +47,12 @@ PhysAddr buildDeviceTreeBlob()
 
 	uint32_t cpu_intc_phandles[MAX_CPUS] = {};
 
-	// TODO: SMP
-	for (int ncpu = 0; ncpu < 1; ++ncpu) {
+	for (unsigned int ncpu = 0; ncpu < SMP::numberOfCPUs(); ++ncpu) {
 		char cpu_nodename[] = "cpu@XXX";
 		snprintf(cpu_nodename, sizeof(cpu_nodename), "cpu@%d", ncpu);
 		const int cpu_ofs = fdt_add_subnode(dt_virt, cpus_ofs, cpu_nodename);
 		fdt_setprop_string(dt_virt, cpu_ofs, "device_type", "cpu");
-		fdt_setprop_u32(dt_virt, cpu_ofs, "reg", ncpu);
+		fdt_setprop_u32(dt_virt, cpu_ofs, "reg", SMP::cpuNumToHartID(ncpu));
 		fdt_setprop_string(dt_virt, cpu_ofs, "status", "okay");
 		fdt_setprop_string(dt_virt, cpu_ofs, "compatible", "riscv");
 		fdt_setprop_string(dt_virt, cpu_ofs, "riscv,isa-base", "rv64i");
@@ -81,6 +82,7 @@ PhysAddr buildDeviceTreeBlob()
 	fdt_appendprop_u64(dt_virt, imsic_ofs, "reg", 0xFEE00000ul);
 	fdt_appendprop_u64(dt_virt, imsic_ofs, "reg", 0x1000ul);
 	fdt_setprop_u32(dt_virt, imsic_ofs, "riscv,num-ids", 63);
+	// TODO: Mention other CPUs, has to match LAPIC IDs for MSIs
 	for (int ncpu = 0; ncpu < 1; ++ncpu) {
 		fdt_appendprop_u32(dt_virt, imsic_ofs, "interrupts-extended", cpu_intc_phandles[ncpu]);
 		fdt_appendprop_u32(dt_virt, imsic_ofs, "interrupts-extended", 9);

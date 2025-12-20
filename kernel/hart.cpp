@@ -3,6 +3,7 @@
 
 #include "hpet.h"
 #include "loaderapi.h"
+#include "percpu.h"
 #include "rvmmu.h"
 #include "sbi.h"
 #include "utils.h"
@@ -56,7 +57,7 @@ void Hart::handleSRET()
 	this->pc = this->sepc;
 }
 
-uint64_t Hart::global_time = 0;
+_Atomic uint64_t Hart::global_time;
 
 void Hart::handlePendingInterrupts()
 {
@@ -67,7 +68,7 @@ void Hart::handlePendingInterrupts()
 		this->sip &= ~SIP_STIP;
 
 	// IMSIC external interrupts
-	int extInt = -1;
+	int extInt = 0;
 	// Find lowest pending external interrupt
 	for (unsigned int i = 0; i < sizeof(this->eip_64) / sizeof(this->eip_64[0]); ++i) {
 		auto iepend = this->eip_64[i] & this->eie_64[i];
@@ -81,7 +82,7 @@ void Hart::handlePendingInterrupts()
 	if (extInt > 0 && (this->eithreshold == 0 || uint64_t(extInt) < this->eithreshold))
 		this->stopei = (extInt << 16) | extInt;
 	else
-		this->stopei = 0; // TODO: What about extInt == 0?
+		this->stopei = 0;
 
 	if (this->stopei && this->eidelivery == 1)
 		this->sip |= SIP_SEIP;
@@ -112,11 +113,11 @@ bool Hart::fetchInstruction(uint16_t *inst, uint64_t addr)
 		panic("Unaligned instruction fetch");
 
 	// Hacky iTLB: Remember the last translated page
-	static uint64_t last_virt = 0, last_phys = 0, last_satp = 0;
+	/*static uint64_t last_virt = 0, last_phys = 0, last_satp = 0;
 	if (last_satp == this->satp && last_virt == (addr & ~0xFFFul)) {
 		*inst = *phys_to_virt<uint16_t>(last_phys + (addr & 0xFFFul));
 		return true;
-	}
+	}*/
 
 	auto res = mmu_translate(this, addr, AccessType::Exec);
 	if (!res.pageoff_mask) {
@@ -125,9 +126,9 @@ bool Hart::fetchInstruction(uint16_t *inst, uint64_t addr)
 	}
 
 	PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
-	last_virt = addr & ~0xFFFul;
+	/*last_virt = addr & ~0xFFFul;
 	last_phys = phys & ~0xFFFul;
-	last_satp = this->satp;
+	last_satp = this->satp;*/
 	*inst = *phys_to_virt<uint16_t>(phys);
 	return true;
 }
@@ -252,10 +253,16 @@ uint64_t Hart::getCSR(uint16_t csr)
 		return this->scause;
 	case 0x143u:
 		return this->stval;
+	case 0x144u:
+		return this->sip;
 	case 0x151u: { // sireg -> indirect CSRs
 		auto numEIRegs = sizeof(this->eie_64) / sizeof(this->eie_64[0]) * 2;
 		auto numEIReg = this->siselect & 63;
-		if (this->siselect >= 0xC0 && numEIReg < numEIRegs && !(numEIReg & 1)) // eie0-eie63
+		if (this->siselect >= 0x80 && this->siselect < 0xC0
+		    && numEIReg < numEIRegs && !(numEIReg & 1)) // eip0-eip63
+			return this->eip_64[numEIReg / 2];
+		else if (this->siselect >= 0xC0 && this->siselect < 0x100
+		         && numEIReg < numEIRegs && !(numEIReg & 1)) // eie0-eie63
 			return this->eie_64[numEIReg / 2];
 
 		panic("Unknown indirect CSR read 0x%lx", this->siselect);
@@ -326,7 +333,11 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 				this->eidelivery = value;
 		} else if (this->siselect == 0x72) {
 			this->eithreshold = value;
-		} else if (this->siselect >= 0xC0 && numEIReg < numEIRegs && !(numEIReg & 1)) { // eie0-eie63
+		} else if (this->siselect >= 0x80 && this->siselect < 0xC0
+		           && numEIReg < numEIRegs && !(numEIReg & 1)) { // eip0-eip63
+			this->eip_64[numEIReg / 2] = value;
+		} else if (this->siselect >= 0xC0 && this->siselect < 0x100
+		           && numEIReg < numEIRegs && !(numEIReg & 1)) { // eie0-eie63
 			this->eie_64[numEIReg / 2] = value;
 		} else
 			panic("Unknown indirect CSR write 0x%lx", this->siselect);
@@ -1700,11 +1711,13 @@ void Hart::runInstruction(uint32_t inst)
 
 void Hart::run()
 {
+	uint32_t counter = 0;
 	for(;;)
 	{
-		static uint32_t counter = 0;
 		if ((counter++ % 1024) == 0) {
-			global_time += 16;
+			if (getPerCPU()->cpu_id == 0)
+				global_time += 16;
+
 			this->handlePendingInterrupts();
 		}
 

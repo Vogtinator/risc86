@@ -1,11 +1,15 @@
 #include <stdio.h>
 
 #include "sbi.h"
+#include "percpu.h"
+#include "smp.h"
 #include "utils.h"
 
 enum {
 	SBI_SUCCESS = 0,
 	SBI_ERR_NOT_SUPPORTED = -2,
+	SBI_ERR_INVALID_PARAM = -3,
+	SBI_ERR_ALREADY_AVAILABLE = -6,
 };
 
 enum {
@@ -41,12 +45,12 @@ static uint64_t sbiCall(Hart *hart, uint64_t *result)
 			{
 			case SBI_EXT_BASE:
 			case SBI_EXT_SRST:
+			case SBI_EXT_HSM:
+			case SBI_EXT_sPI:
+			case SBI_EXT_RFNC:
 				*result = 1;
 				break;
 			case SBI_EXT_TIME:
-			case SBI_EXT_sPI:
-			case SBI_EXT_RFNC:
-			case SBI_EXT_HSM:
 			case SBI_EXT_PMU:
 				*result = 0;
 				break;
@@ -72,6 +76,56 @@ static uint64_t sbiCall(Hart *hart, uint64_t *result)
 		if (func == 0)
 			panic("SBI system reset type %lx reason %lx", hart->regs[10], hart->regs[11]);
 
+		break;
+	case SBI_EXT_HSM:
+		if (func == 0) { // hart_start
+			uint64_t hartid = hart->regs[10], start_addr = hart->regs[11], opaque = hart->regs[12];
+
+			int otherCPUNum = SMP::hartIDToCPUNum(hartid);
+			if (otherCPUNum < 0)
+				return SBI_ERR_INVALID_PARAM;
+
+			auto *otherHart = &getPerCPUForOtherCPU(otherCPUNum)->hart;
+			if (otherHart->state != Hart::State::STOPPED)
+				return SBI_ERR_ALREADY_AVAILABLE; // The spec does not use SBI_ERR_ALREADY_STARTED here
+
+			otherHart->satp = 0;
+			otherHart->sstatus = 0;
+			otherHart->regs[10] = hartid;
+			otherHart->regs[11] = opaque;
+			otherHart->pc = start_addr;
+			otherHart->state = Hart::State::START_PENDING;
+
+			SMP::sendIPI(hartid);
+			return SBI_SUCCESS;
+		}
+
+		break;
+	case SBI_EXT_sPI:
+		if (func == 0) { // send_ipi
+			uint64_t hart_mask = hart->regs[10], hart_mask_base = hart->regs[11];
+
+			for (int hartBit = 0; hartBit < 64; ++hartBit) {
+				if ((hart_mask & (1ul << hartBit)) == 0)
+					continue;
+
+				auto hartID = hart_mask_base + hartBit;
+				int otherCPUNum = SMP::hartIDToCPUNum(hartID);
+				if (otherCPUNum < 0)
+					return SBI_ERR_INVALID_PARAM;
+
+				auto *otherHart = &getPerCPUForOtherCPU(otherCPUNum)->hart;
+				otherHart->ipiRequested = true;
+				SMP::sendIPI(hartID);
+			}
+
+			return SBI_SUCCESS;
+		}
+
+		break;
+	case SBI_EXT_RFNC:
+		// For now completely ignored
+		return SBI_SUCCESS;
 		break;
 	case 0x5D: // Used by riscv-tests
 		if (hart->regs[10])

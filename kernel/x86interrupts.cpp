@@ -26,27 +26,48 @@ static uint8_t x86IRQtoRVExtIRQ(uint8_t x86IRQ)
 {
 	// TODO: Kernel patched to not need shifting.
 	return x86IRQ;
-	//return x86IRQ - 32;
+	//return x86IRQ - X86_IRQ_RV_FIRST;
 }
 
 static uint8_t rvExtIRQtoX86IRQ(unsigned int rvIRQ)
 {
-	if (rvIRQ < 32 || rvIRQ >= 256)
+	if (rvIRQ < X86_IRQ_RV_FIRST || rvIRQ >= X86_IRQ_RV_LAST)
 		panic("Invalid RV IRQ %d", rvIRQ);
 
 	// TODO: Kernel patched to not need shifting.
 	return rvIRQ;
-	//return x86IRQ + 32;
+	//return x86IRQ + X86_IRQ_RV_FIRST;
 }
 
 __attribute__((no_caller_saved_registers))
 static void irqHandler(InterruptFrame *frame, int irq)
 {
-	auto rvExtIRQ = x86IRQtoRVExtIRQ(irq);
-	if (rvExtIRQ / 64 >= sizeof(Hart::eip_64)/sizeof(Hart::eip_64[0]))
-		panic("Unexpected IRQ %d", irq);
+	auto *hart = &getPerCPU()->hart;
 
-	getPerCPU()->hart.eip_64[rvExtIRQ / 64] |= 1ul << (rvExtIRQ % 64);
+	if (irq >= X86_IRQ_RV_FIRST && irq <= X86_IRQ_RV_LAST) {
+		static_assert(X86_IRQ_RV_LAST / 64 < sizeof(Hart::eip_64)/sizeof(Hart::eip_64[0]));
+		auto rvExtIRQ = x86IRQtoRVExtIRQ(irq);
+		if (rvExtIRQ / 64 >= sizeof(Hart::eip_64)/sizeof(Hart::eip_64[0]))
+			panic("Unexpected IRQ %d", irq);
+
+		hart->eip_64[rvExtIRQ / 64] |= 1ul << (rvExtIRQ % 64);
+	} else if (irq == X86_IRQ_IPI) {
+		if (hart->state == Hart::State::START_PENDING)
+			hart->state = Hart::State::STARTED;
+		else if (hart->ipiRequested) {
+			hart->sip |= SIP_SSIP;
+			hart->ipiRequested = false;
+		} else {
+			panic("IPI for unknown cause\n");
+		}
+
+		lapicWrite(0xB0, 0x00);
+	} else if (irq == X86_IRQ_SPURIOUS) {
+		// lapicWrite(0xB0, 0x00); needed?
+		return;
+	} else {
+		panic("Unexpected IRQ %d", irq);
+	}
 }
 
 // x86 calls a different handler for each interrupt vector,
@@ -126,16 +147,6 @@ static void outb(uint16_t port, uint8_t value)
 
 void setupInterrupts()
 {
-	struct {
-		uint16_t size;
-		uintptr_t idtAddr;
-	} __attribute__((packed)) idtr = {
-	    .size = sizeof(idt) - 1,
-	    .idtAddr = uintptr_t(&idt),
-    };
-
-	asm volatile("lidt %[idtr]" :: [idtr] "m" (idtr));
-
 	outb(0x21, 0xFF); // Mask master PIC interrupts
 
 	uacpi_table tbl;
@@ -160,6 +171,21 @@ void setupInterrupts()
 
 	printf("LAPIC addr: %lx\n", lapicPhys);
 	lapic = phys_to_virt<volatile uint32_t>(lapicPhys);
+
+	setupInterruptsPerCPU();
+}
+
+void setupInterruptsPerCPU()
+{
+	struct {
+		uint16_t size;
+		uintptr_t idtAddr;
+	} __attribute__((packed)) idtr = {
+		.size = sizeof(idt) - 1,
+		.idtAddr = uintptr_t(&idt),
+	};
+
+	asm volatile("lidt %[idtr]" :: [idtr] "m" (idtr));
 
 	// Set the spurious interrupt register to 0x100 | 0xFF
 	lapicWrite(0xF0, 0x1FF);

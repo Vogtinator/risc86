@@ -62,7 +62,23 @@ void kernel_entry(KernelParams *params)
 
 	setupInterrupts();
 
-	setupSMP();
+	auto secondaryCallback = [](unsigned int cpuNum) {
+		// Setup per-CPU state for secondary cores
+		setupPerCPUState(cpuNum);
+
+		setupInterruptsPerCPU();
+
+		auto *hart = &getPerCPU()->hart;
+
+		for (;;) {
+			while (hart->state != Hart::State::STARTED)
+				asm volatile("hlt");
+
+			hart->run();
+		}
+	};
+
+	SMP::setupSMP(secondaryCallback);
 
 	//setupHPET();
 
@@ -79,8 +95,9 @@ void kernel_entry(KernelParams *params)
 
 	// Set up hart 0 to jump to the kernel
 	auto *hart0 = &getPerCPU()->hart;
+	hart0->state = Hart::State::STARTED;
 	hart0->mode = Hart::MODE_SUPERVISOR;
-	hart0->regs[10] = 0; // a0 = Hart ID
+	hart0->regs[10] = SMP::cpuNumToHartID(0); // a0 = Hart ID
 	hart0->regs[11] = dtb; // a1 = phys addr of DT
 	hart0->pc = params->kernel_phys;
 
