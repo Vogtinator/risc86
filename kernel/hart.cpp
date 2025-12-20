@@ -1,4 +1,6 @@
 #include <math.h>
+#include <stdint.h>
+#include <stdatomic.h> // stdatomic.h needs stdint.h included before
 #include <stdio.h>
 
 #include "hpet.h"
@@ -35,6 +37,7 @@ void Hart::handleInterrupt(uint64_t cause, uint64_t stval)
 	this->sstatus = sstatus;
 	this->pc = this->stvec;
 	this->mode = Hart::MODE_SUPERVISOR;
+	this->lr_sc_pending = false;
 }
 
 void Hart::handleSRET()
@@ -55,6 +58,7 @@ void Hart::handleSRET()
 
 	this->sstatus = sstatus;
 	this->pc = this->sepc;
+	this->lr_sc_pending = false;
 }
 
 _Atomic uint64_t Hart::global_time;
@@ -155,7 +159,7 @@ bool Hart::virtRead(uint64_t addr, T *value)
 }
 
 template <typename T> __attribute__((warn_unused_result))
-bool Hart::virtWrite(uint64_t addr, T value)
+bool Hart::virtWritePtr(uint64_t addr, T **ptr)
 {
 	if (addr & (sizeof(T) - 1)) {
 		if (!this->satp) {
@@ -176,7 +180,18 @@ bool Hart::virtWrite(uint64_t addr, T value)
 	}
 
 	PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
-	*phys_to_virt<T>(phys) = value;
+	*ptr = phys_to_virt<T>(phys);
+	return true;
+}
+
+template <typename T> __attribute__((warn_unused_result))
+bool Hart::virtWrite(uint64_t addr, T value)
+{
+	T *ptr;
+	if (!virtWritePtr(addr, &ptr))
+		return false;
+
+	*ptr = value;
 	return true;
 }
 
@@ -1010,76 +1025,80 @@ void Hart::runInstruction(uint32_t inst)
 		case 0x002u: // amoadd.w
 		{
 			uint64_t addr = getReg(rs1);
-			uint32_t val;
-			if (!virtRead<uint32_t>(addr, &val))
+			_Atomic(uint32_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
 				return;
 
-			if (!virtWrite<uint32_t>(addr, val + uint32_t(getReg(rs2))))
-				return;
-
+			uint32_t val = atomic_fetch_add(ptr, uint32_t(getReg(rs2)));
 			setReg(rd, int64_t(int32_t(val)));
+			break;
+		}
+		case 0x003u: // amoadd.d
+		{
+			uint64_t addr = getReg(rs1);
+			_Atomic(uint64_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
+				return;
+
+			uint64_t val = atomic_fetch_add(ptr, getReg(rs2));
+			setReg(rd, val);
 			break;
 		}
 		case 0x042u: // amoswap.w
 		{
 			uint64_t addr = getReg(rs1);
-			uint32_t val;
-			if (!virtRead<uint32_t>(addr, &val))
+			_Atomic(uint32_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
 				return;
 
-			if (!virtWrite<uint32_t>(addr, getReg(rs2)))
-				return;
-
+			uint32_t val = atomic_exchange(ptr, uint32_t(getReg(rs2)));
 			setReg(rd, int64_t(int32_t(val)));
 			break;
 		}
+		case 0x043u: // amoswap.d
+		{
+			uint64_t addr = getReg(rs1);
+			_Atomic(uint64_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
+				return;
+
+			uint64_t val = atomic_exchange(ptr, getReg(rs2));
+			setReg(rd, val);
+			break;
+		}
+		/* Emulating LR/SC using weaker compare-exchange is technically wrong
+		 * but probably fine in most cases, as most high-level languages
+		 * expose only CAS semantics anyway. */
 		case 0x082u: // lr.w
 		{
 			if (rs2 != 0u)
 				panic("lr with non-zero");
 
 			uint64_t addr = getReg(rs1);
-			uint32_t val;
-			if (!virtRead<uint32_t>(addr, &val))
+			_Atomic(uint32_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
 				return;
 
-			setReg(rd, int32_t(val));
+			lr_sc_pending = true;
+			lr_sc_address = addr;
+			lr_sc_value = int32_t(*ptr);
+			setReg(rd, lr_sc_value);
 			break;
 		}
 		case 0x0c2u: // sc.w
 		{
 			uint64_t addr = getReg(rs1);
-			if (!virtWrite<uint32_t>(addr, getReg(rs2)))
+			_Atomic(uint32_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
 				return;
 
-			setReg(rd, 0u);
-			break;
-		}
-		case 0x003u: // amoadd.d
-		{
-			uint64_t addr = getReg(rs1);
-			uint64_t val;
-			if (!virtRead<uint64_t>(addr, &val))
-				return;
+			uint32_t expected = lr_sc_value, desired = getReg(rs2);
+			if (lr_sc_pending && lr_sc_address == addr
+			    && atomic_compare_exchange_strong(ptr, &expected, desired))
+				setReg(rd, 0u); // Success
+			else
+				setReg(rd, 1u); // Fail
 
-			if (!virtWrite<uint64_t>(addr, val + getReg(rs2)))
-				return;
-
-			setReg(rd, val);
-			break;
-		}
-		case 0x043u: // amoswap.d
-		{
-			// TODO: Is this correct? Several docs disagree...
-			uint64_t addr = getReg(rs1);
-			uint64_t val;
-			if (!virtRead<uint64_t>(addr, &val))
-				return;
-
-			if (!virtWrite<uint64_t>(addr, getReg(rs2)))
-				return;
-
-			setReg(rd, val);
 			break;
 		}
 		case 0x083u: // lr.d
@@ -1088,109 +1107,119 @@ void Hart::runInstruction(uint32_t inst)
 				panic("lr with non-zero");
 
 			uint64_t addr = getReg(rs1);
-			uint64_t val;
-			if (!virtRead<uint64_t>(addr, &val))
+			_Atomic(uint64_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
 				return;
 
-			setReg(rd, val);
+			lr_sc_pending = true;
+			lr_sc_address = addr;
+			lr_sc_value = *ptr;
+			setReg(rd, lr_sc_value);
 			break;
 		}
 		case 0x0c3u: // sc.d
 		{
 			uint64_t addr = getReg(rs1);
-			if (!virtWrite<uint64_t>(addr, getReg(rs2)))
+			_Atomic(uint64_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
 				return;
 
-			setReg(rd, 0u);
+			uint64_t expected = lr_sc_value, desired = getReg(rs2);
+			if (lr_sc_pending && lr_sc_address == addr
+			    && atomic_compare_exchange_strong(ptr, &expected, desired))
+				setReg(rd, 0u); // Success
+			else
+				setReg(rd, 1u); // Fail
+
 			break;
 		}
 		case 0x103u: // amoxor.d
 		{
 			uint64_t addr = getReg(rs1);
-			uint64_t val;
-			if (!virtRead<uint64_t>(addr, &val))
+			_Atomic(uint64_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
 				return;
 
-			if (!virtWrite<uint64_t>(addr, val ^ getReg(rs2)))
-				return;
-
+			uint64_t val = atomic_fetch_xor(ptr, getReg(rs2));
 			setReg(rd, val);
 			break;
 		}
 		case 0x202u: // amoor.w
 		{
 			uint64_t addr = getReg(rs1);
-			uint32_t val;
-			if (!virtRead<uint32_t>(addr, &val))
+			_Atomic(uint32_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
 				return;
 
-			if (!virtWrite<uint32_t>(addr, val | getReg(rs2)))
-				return;
-
+			uint32_t val = atomic_fetch_or(ptr, uint32_t(getReg(rs2)));
 			setReg(rd, int64_t(int32_t(val)));
 			break;
 		}
 		case 0x203u: // amoor.d
 		{
 			uint64_t addr = getReg(rs1);
-			uint64_t val;
-			if (!virtRead<uint64_t>(addr, &val))
+			_Atomic(uint64_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
 				return;
 
-			if (!virtWrite<uint64_t>(addr, val | getReg(rs2)))
-				return;
-
+			uint64_t val = atomic_fetch_or(ptr, getReg(rs2));
 			setReg(rd, val);
 			break;
 		}
 		case 0x302u: // amoand.w
 		{
 			uint64_t addr = getReg(rs1);
-			uint32_t val;
-			if (!virtRead<uint32_t>(addr, &val))
+			_Atomic(uint32_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
 				return;
 
-			if (!virtWrite<uint32_t>(addr, val & getReg(rs2)))
-				return;
-
+			uint32_t val = atomic_fetch_and(ptr, uint32_t(getReg(rs2)));
 			setReg(rd, int64_t(int32_t(val)));
 			break;
 		}
 		case 0x303u: // amoand.d
 		{
 			uint64_t addr = getReg(rs1);
-			uint64_t val;
-			if (!virtRead<uint64_t>(addr, &val))
+			_Atomic(uint64_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
 				return;
 
-			if (!virtWrite<uint64_t>(addr, val & getReg(rs2)))
-				return;
-
+			uint64_t val = atomic_fetch_and(ptr, getReg(rs2));
 			setReg(rd, val);
 			break;
 		}
 		case 0x702u: // amomaxu.w
 		{
 			uint64_t addr = getReg(rs1);
-			uint32_t val;
-			if (!virtRead(addr, &val))
+			_Atomic(uint32_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
 				return;
 
-			if (!virtWrite(addr, max(val, uint32_t(getReg(rs2)))))
-				return;
+			uint32_t val;
+			for (;;) {
+				val = *ptr;
+				uint32_t desired = max(val, uint32_t(getReg(rs2)));
+				if (atomic_compare_exchange_weak(ptr, &val, desired))
+					break;
+			}
 
 			setReg(rd, int64_t(int32_t(val)));
 			break;
 		}
-		case 0x703u: // amomaxu
+		case 0x703u: // amomaxu.d
 		{
 			uint64_t addr = getReg(rs1);
-			uint64_t val;
-			if (!virtRead(addr, &val))
+			_Atomic(uint64_t) *ptr;
+			if (!virtWritePtr(addr, &ptr))
 				return;
 
-			if (!virtWrite(addr, max(val, getReg(rs2))))
-				return;
+			uint64_t val;
+			for (;;) {
+				val = *ptr;
+				uint64_t desired = max(val, getReg(rs2));
+				if (atomic_compare_exchange_weak(ptr, &val, desired))
+					break;
+			}
 
 			setReg(rd, val);
 			break;

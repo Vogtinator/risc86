@@ -79,6 +79,10 @@ struct Hart {
 
 	_Atomic bool ipiRequested;
 
+	// For LR/SC emulation
+	bool lr_sc_pending;
+	uint64_t lr_sc_address, lr_sc_value;
+
 	void dump();
 	void run();
 
@@ -95,9 +99,16 @@ private:
 	__attribute__((warn_unused_result))
 	bool fetchInstruction(uint16_t *inst, uint64_t addr);
 
+	// Read a T from guest virtual memory at addr.
+	// On fault, prepares the CPU for fault handling and returns false.
 	template <typename T> __attribute__((warn_unused_result))
 	bool virtRead(uint64_t addr, T *value);
 
+	// Get a pointer to T at addr in guest virtual memory.
+	template <typename T> __attribute__((warn_unused_result))
+	bool virtWritePtr(uint64_t addr, T **ptr);
+
+	// Write a T to guest virtual memory.
 	template <typename T> __attribute__((warn_unused_result))
 	bool virtWrite(uint64_t addr, T value);
 
