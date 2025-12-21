@@ -286,12 +286,13 @@ int SMP::hartIDToCPUNum(uint64_t hartID)
 	return -1;
 }
 
-void SMP::sendIPI(uint64_t hartId)
+void SMP::sendIPI(uint64_t hartId, uint8_t irq)
 {
 	// Send IPI
 	lapicWrite(0x310, hartId << 24);
-	lapicWrite(0x300, (1 << 14) | X86_IRQ_IPI);
+	lapicWrite(0x300, (1 << 14) | irq);
 
 	// Wait until sent
 	while (lapicRead(0x310) & (1 << 14)) asm volatile("pause");
 }
+

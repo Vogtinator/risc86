@@ -4,6 +4,7 @@
 #include "percpu.h"
 #include "smp.h"
 #include "utils.h"
+#include "x86interrupts.h"
 
 enum {
 	SBI_SUCCESS = 0,
@@ -96,7 +97,7 @@ static uint64_t sbiCall(Hart *hart, uint64_t *result)
 			otherHart->pc = start_addr;
 			otherHart->state = Hart::State::START_PENDING;
 
-			SMP::sendIPI(hartid);
+			SMP::sendIPI(hartid, X86_IRQ_INTERNAL_IPI);
 			return SBI_SUCCESS;
 		}
 
@@ -114,9 +115,7 @@ static uint64_t sbiCall(Hart *hart, uint64_t *result)
 				if (otherCPUNum < 0)
 					return SBI_ERR_INVALID_PARAM;
 
-				auto *otherHart = &getPerCPUForOtherCPU(otherCPUNum)->hart;
-				otherHart->ipiRequested = true;
-				SMP::sendIPI(hartID);
+				SMP::sendIPI(hartID, X86_IRQ_RV_IPI);
 			}
 
 			return SBI_SUCCESS;

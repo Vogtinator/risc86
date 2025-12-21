@@ -79,8 +79,6 @@ struct Hart {
 		START_PENDING = 2,
 	} state = Hart::State::STOPPED;
 
-	_Atomic bool ipiRequested;
-
 	// For LR/SC emulation
 	bool lr_sc_pending;
 	uint64_t lr_sc_address, lr_sc_value;

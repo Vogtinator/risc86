@@ -51,15 +51,14 @@ static void irqHandler(InterruptFrame *frame, int irq)
 			panic("Unexpected IRQ %d", irq);
 
 		hart->eip_64[rvExtIRQ / 64] |= 1ul << (rvExtIRQ % 64);
-	} else if (irq == X86_IRQ_IPI) {
+	} else if (irq == X86_IRQ_RV_IPI) {
+		hart->sip |= SIP_SSIP;
+		lapicWrite(0xB0, 0x00);
+	} else if (irq == X86_IRQ_INTERNAL_IPI) {
 		if (hart->state == Hart::State::START_PENDING)
 			hart->state = Hart::State::STARTED;
-		else if (hart->ipiRequested) {
-			hart->sip |= SIP_SSIP;
-			hart->ipiRequested = false;
-		} else {
+		else
 			panic("IPI for unknown cause\n");
-		}
 
 		lapicWrite(0xB0, 0x00);
 	} else if (irq == X86_IRQ_SPURIOUS) {
@@ -130,6 +129,7 @@ static IDTEntry idt[] = {
 static PhysAddr lapicPhys = 0;
 static volatile uint32_t *lapic = nullptr;
 
+__attribute__((no_caller_saved_registers))
 void lapicWrite(uint32_t offset, uint32_t value)
 {
 	lapic[offset / 4] = value;
