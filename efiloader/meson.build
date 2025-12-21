@@ -67,6 +67,7 @@ qemu_args = [
     '-accel', 'kvm',
     '-M', 'q35',
     '-cpu', 'host',
+    '-smp', '4',
     '-m', '4G',
     '-chardev', 'stdio,mux=on,id=out',
     '-serial', 'chardev:out',
