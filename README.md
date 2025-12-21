@@ -8,7 +8,27 @@ RISC86 is an EFI executable that provides an environment for running RISC-V oper
 State
 --
 
-As of now, it can boot mainline kernels and run generic userspace (without F/D instructions), but it's quite slow as acceleration using the x86 MMU and JITing of code is not implemented yet.
+As of now, it can boot mainline kernels and run generic userspace, but it's quite slow as acceleration using the x86 MMU and JITing of code is not implemented yet.
+
+There's no remapping of RISC-V external interrupts ATM, so for PCI support, a kernel patch is required to avoid IRQs reserved by x86:
+
+```diff
+diff --git a/drivers/irqchip/irq-riscv-imsic-state.c b/drivers/irqchip/irq-riscv-imsic-state.c
+index dc95ad856d80..5553cffeb4d2 100644
+--- a/drivers/irqchip/irq-riscv-imsic-state.c
++++ b/drivers/irqchip/irq-riscv-imsic-state.c
+@@ -582,6 +582,9 @@ static int __init imsic_matrix_init(void)
+        /* Reserve ID#0 because it is special and never implemented */
+        irq_matrix_assign_system(imsic->matrix, 0, false);
+ 
++       for (int i = 1; i < 32; ++i)
++               irq_matrix_assign_system(imsic->matrix, i, false);
++
+        /* Reserve IPI ID because it is special and used internally */
+        if (!imsic_noipi)
+                irq_matrix_assign_system(imsic->matrix, IMSIC_IPI_ID, false);
+
+```
 
 Why
 ---
