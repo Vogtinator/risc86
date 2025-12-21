@@ -226,7 +226,7 @@ void Hart::dump()
 	// Print CSRs
 	struct { uint64_t *ptr; const char *name; } csrs[] = {
 #define REG(x) { &this->x, # x }
-		REG(sstatus), REG(stvec), REG(sip), REG(sie), REG(sscratch),
+		REG(sstatus), REG(stvec), REG(sie), REG(sscratch),
 		REG(sepc), REG(scause), REG(stval), REG(satp), REG(stimecmp)
 #undef REG
 	};
@@ -234,6 +234,7 @@ void Hart::dump()
 	for (auto csr : csrs)
 		printf("%8s: %016lx\n", csr.name, *csr.ptr);
 
+	printf("sip: %08x\n", this->scounteren);
 	printf("scounteren: %08x\n", this->scounteren);
 }
 

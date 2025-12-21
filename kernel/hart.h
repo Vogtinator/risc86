@@ -50,7 +50,8 @@ struct Hart {
 	// CSRs
 	uint64_t sstatus;
 	uint64_t stvec;
-	uint64_t sip, sie;
+	_Atomic uint64_t sip; // Written by this CPU's IRQ handlers
+	uint64_t sie;
 	uint32_t scounteren; // Only & 3 supported
 	uint64_t sscratch;
 	uint64_t sepc;
@@ -67,7 +68,8 @@ struct Hart {
 	// IMSIC CSRs (indirect)
 	uint64_t eidelivery; // Only & 1 supported
 	uint64_t eithreshold;
-	uint64_t eip_64[2], eie_64[2]; // 64 bits, so there is no eip1, eip3, ...
+	_Atomic uint64_t eip_64[2]; // Written by this CPU's IRQ handlers
+	uint64_t eie_64[2]; // 64 bits, so there is no eip1, eip3, ...
 
 	// The _Atomic variables here are written by other CPUs
 	// Same values as SBI HSM states

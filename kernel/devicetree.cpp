@@ -70,6 +70,7 @@ PhysAddr buildDeviceTreeBlob()
 	}
 
 	// Add LAPIC as IMSIC :D
+	const uint64_t max_hartid = SMP::numberOfCPUs() - 1; // TODO: Could be unrelated.
 	const int imsic_ofs = fdt_add_subnode(dt_virt, root_ofs, "lapic");
 	uint32_t imsic_phandle;
 	fdt_generate_phandle(dt_virt, &imsic_phandle);
@@ -80,11 +81,15 @@ PhysAddr buildDeviceTreeBlob()
 	fdt_setprop_empty(dt_virt, imsic_ofs, "msi-controller");
 	fdt_setprop_u32(dt_virt, imsic_ofs, "#msi-cells", 0);
 	fdt_appendprop_u64(dt_virt, imsic_ofs, "reg", 0xFEE00000ul);
-	fdt_appendprop_u64(dt_virt, imsic_ofs, "reg", 0x1000ul);
+	fdt_appendprop_u64(dt_virt, imsic_ofs, "reg", 0x1000ul * max_hartid + 1);
 	fdt_setprop_u32(dt_virt, imsic_ofs, "riscv,num-ids", 63);
-	// TODO: Mention other CPUs, has to match LAPIC IDs for MSIs
-	for (int ncpu = 0; ncpu < 1; ++ncpu) {
-		fdt_appendprop_u32(dt_virt, imsic_ofs, "interrupts-extended", cpu_intc_phandles[ncpu]);
+	// The index into the array has to match LAPIC IDs for MSIs
+	for (uint64_t hartid = 0; hartid <= max_hartid; ++hartid) {
+		int cpunum = SMP::hartIDToCPUNum(hartid);
+		if (cpunum < 0)
+			panic("Non-contiguous hart ids");
+
+		fdt_appendprop_u32(dt_virt, imsic_ofs, "interrupts-extended", cpu_intc_phandles[cpunum]);
 		fdt_appendprop_u32(dt_virt, imsic_ofs, "interrupts-extended", 9);
 	}
 
