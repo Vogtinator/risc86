@@ -74,6 +74,12 @@ qemu_args = [
     '-no-reboot',
     '-bios', '/usr/share/qemu/ovmf-x86_64.bin',
     '-drive', 'file=fat:' + qemu_esp_dir + ',readonly=on,if=virtio',
+    '-vga', 'virtio',
+    '-net', 'nic,model=virtio',
+    '-net', 'user',
+    '-device', 'qemu-xhci',
+    '-device', 'usb-kbd',
+    '-device', 'usb-tablet',
 ]
 
 custom_target(

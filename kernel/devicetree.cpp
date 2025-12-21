@@ -28,7 +28,7 @@ PhysAddr buildDeviceTreeBlob()
 	// Chosen node
 	const int chosen_ofs = fdt_add_subnode(dt_virt, root_ofs, "chosen");
 	// TODO: Instead of irqchip.riscv_imsic_noipi, implement IMSIC IPIs
-	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "loglevel=9 earlycon=sbi console=hvc0 security=selinux systemd.log_target=console linuxrc.log=/dev/console linuxrc.debug=1 pci=realloc rw root=/dev/vdb2 init=/usr/lib/systemd/systemd irqchip.riscv_imsic_noipi");
+	fdt_setprop_string(dt_virt, chosen_ofs, "bootargs", "loglevel=9 earlycon=sbi console=hvc0 security=selinux systemd.log_target=console linuxrc.log=/dev/console linuxrc.debug=1 rw root=/dev/vdb2 init=/usr/lib/systemd/systemd irqchip.riscv_imsic_noipi");
 	// TODO: Fill that randomly (using rdrand/rdseed?)
 	for(uint32_t i : (uint32_t[]){0xe3c3d5c1u, 0x67270453u, 0x27a09781u, 0xa54ed241u,
 	                              0x66d189d4u, 0x24efaf2fu, 0xf887c4d7u, 0xec6a7c2bu})

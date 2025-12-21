@@ -103,12 +103,6 @@ static void scanBus(PCI::Controller *controller, int bus)
 				if (range.is64bit) // Covers two BARs
 					++bar;
 
-				// TODO: Once virtual memory access no longer needs phys_to_virt
-				if (range.start >> 32) {
-					printf("Not in physmap, can't use yet\n");
-					continue;
-				}
-
 				if (controller->numRanges >= PCI::MAX_RANGES_PER_CONTROLLER)
 					panic("Too many ranges");
 
@@ -147,10 +141,5 @@ void PCI::setupPCI()
 
 		for (int bus = entry->start_bus; bus <= entry->end_bus; ++bus)
 			scanBus(controller, bus);
-
-		// Hack (QEMU specfic): give it some extra space so that pci=realloc can reassign BARs
-		PCI::Controller::Range range = {true, false, 0x90000000, 0x10000000};
-		controller->ranges[controller->numRanges] = range;
-		controller->numRanges++;
 	}
 }
