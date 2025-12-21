@@ -100,6 +100,10 @@ private:
 	// Returns false on fault.
 	__attribute__((warn_unused_result))
 	bool fetchInstruction(uint16_t *inst, uint64_t addr);
+	// Tiny single-entry iTLB: Remember the last translated page
+	struct {
+		uint64_t last_virt, last_phys, last_satp;
+	} itlb;
 
 	// Read a T from guest virtual memory at addr.
 	// On fault, prepares the CPU for fault handling and returns false.

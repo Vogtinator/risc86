@@ -117,11 +117,10 @@ bool Hart::fetchInstruction(uint16_t *inst, uint64_t addr)
 		panic("Unaligned instruction fetch");
 
 	// Hacky iTLB: Remember the last translated page
-	/*static uint64_t last_virt = 0, last_phys = 0, last_satp = 0;
-	if (last_satp == this->satp && last_virt == (addr & ~0xFFFul)) {
-		*inst = *phys_to_virt<uint16_t>(last_phys + (addr & 0xFFFul));
+	if (itlb.last_satp == this->satp && itlb.last_virt == (addr & ~0xFFFul)) {
+		*inst = *phys_to_virt<uint16_t>(itlb.last_phys + (addr & 0xFFFul));
 		return true;
-	}*/
+	}
 
 	auto res = mmu_translate(this, addr, AccessType::Exec);
 	if (!res.pageoff_mask) {
@@ -130,9 +129,9 @@ bool Hart::fetchInstruction(uint16_t *inst, uint64_t addr)
 	}
 
 	PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
-	/*last_virt = addr & ~0xFFFul;
-	last_phys = phys & ~0xFFFul;
-	last_satp = this->satp;*/
+	itlb.last_virt = addr & ~0xFFFul;
+	itlb.last_phys = phys & ~0xFFFul;
+	itlb.last_satp = this->satp;
 	*inst = *phys_to_virt<uint16_t>(phys);
 	return true;
 }
@@ -1742,10 +1741,11 @@ void Hart::runInstruction(uint32_t inst)
 void Hart::run()
 {
 	uint32_t counter = 0;
+	bool isCPU0 = getPerCPU()->cpu_id == 0;
 	for(;;)
 	{
 		if ((counter++ % 1024) == 0) {
-			if (getPerCPU()->cpu_id == 0)
+			if (isCPU0)
 				global_time += 16;
 
 			this->handlePendingInterrupts();
