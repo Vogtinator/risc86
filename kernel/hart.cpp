@@ -1636,8 +1636,13 @@ void Hart::runInstruction(uint32_t inst)
 				this->handlePendingInterrupts();
 				return;
 			} else if (inst == 0x10500073) { // wfi
-				//asm ("hlt");
-				break;
+				this->pc += 4;
+				handlePendingInterrupts();
+				// TODO: What if this races? We only have edge triggered interrupts.
+				if (this->stopi == 0)
+					asm ("hlt");
+
+				return;
 			} else
 				panic("Unsupported misc instruction");
 
