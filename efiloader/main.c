@@ -386,6 +386,10 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	if (EFI_ERROR(Status))
 		return Status;
 
+	Status = mmap(0x38000000000ul, KERNEL_PHYS_START + 0x38000000000ul, 0x100000000ul, PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
+	if (EFI_ERROR(Status))
+		return Status;
+
 	Status = mmap(0x380000000000ul, KERNEL_PHYS_START + 0x380000000000ul, 0x100000000ul, PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
 	if (EFI_ERROR(Status))
 		return Status;
