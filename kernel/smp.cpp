@@ -163,7 +163,7 @@ static void secondaryEntry(unsigned int cpuNum)
 		asm volatile("cli; hlt");
 }
 
-void SMP::setupSMP(void (secondaryCallback)(unsigned int cpuNum))
+void SMP::setupSMP(PhysAddr trampolinePage, void (secondaryCallback)(unsigned int cpuNum))
 {
 	secondaryCallbackGlobal = secondaryCallback;
 
@@ -215,7 +215,7 @@ void SMP::setupSMP(void (secondaryCallback)(unsigned int cpuNum))
 	if (smp_trampoline_size > 4096)
 		panic("Trampoline too big!");
 
-	PhysAddr trampoline = physMemMgr.allocate(4096, MemRegionFree);
+	PhysAddr trampoline = trampolinePage;
 	if (trampoline & 0xFFF)
 		panic("Trampoline not page aligned");
 

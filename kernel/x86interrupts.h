@@ -22,3 +22,13 @@ void markRVExtInterruptHandled(unsigned int rvExtIRQ);
 void markRVIPIHandled();
 void setupInterrupts();
 void setupInterruptsPerCPU();
+
+// Segments defined by the GDT
+enum GDTSegment {
+	SegmentKernelCS = 0x8,
+	SegmentKernelDS = 0x10,
+	SegmentUserCS = 0x18,
+	SegmentUserDS = 0x20,
+};
+
+void setupGDT();

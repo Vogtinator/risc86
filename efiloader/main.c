@@ -442,51 +442,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	if (EFI_ERROR(Status))
 		return Status;
 
-	// Set up GDT
-#pragma pack(push, 1)
-	static struct {
-		uint16_t limit_lo;
-		uint16_t base_lo;
-		uint8_t base_mid;
-		uint8_t access;
-		uint8_t flags_limit;
-		uint8_t base_hi;
-	} gdt[] = {
-		[0] = {},
-		[SegmentKernelCS/8] = { .limit_lo = 0xFFFF, .access = 0b10011011, .flags_limit = 0b10101111 }, // Ring 0 CS
-		[SegmentKernelDS/8] = { .limit_lo = 0xFFFF, .access = 0b10010011, .flags_limit = 0b10001111 }, // Ring 0 DS
-		[SegmentUserCS/8] = { .limit_lo = 0xFFFF, .access = 0b11111011, .flags_limit = 0b10101111 }, // Ring 3 CS
-		[SegmentUserDS/8] = { .limit_lo = 0xFFFF, .access = 0b11110011, .flags_limit = 0b10001111 }, // Ring 3 DS
-	};
-
-	struct {
-		uint16_t limit;
-		uintptr_t pointer;
-	} gdtp = {
-		.limit = sizeof(gdt) - 1,
-		.pointer = (uintptr_t) &gdt,
-	};
-#pragma pack(pop)
-
-	// Load GDT
-	asm volatile("lgdt %[gdtp]" :: [gdtp] "m" (gdtp));
-
-	// Use lretq to far jump to the new CS
-	asm volatile("push %[cs]\n"
-	             "leaq 1f(%%rip), %%rax\n"
-	             "pushq %%rax\n"
-	             "lretq\n"
-	             "1:\n"
-	             :: [cs] "i" (SegmentKernelCS) : "flags", "memory", "rax");
-
-	// Reload data segment registers
-	asm volatile("mov %[ds], %%ds\n"
-	             "mov %[ds], %%es\n"
-	             "mov %[ds], %%fs\n"
-	             "mov %[ds], %%gs\n"
-	             "mov %[ds], %%ss\n"
-	             :: [ds] "r" (SegmentKernelDS) : "memory");
-
 	// Enable some CPU features
 	uint64_t cr4;
 	__asm volatile("mov %%cr4, %[cr4]\n" : [cr4] "=r" (cr4));

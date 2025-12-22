@@ -125,9 +125,9 @@ static IDTEntry idt[] = {
 #define IRQ_HANDLERS_32(n) IRQ_HANDLERS_16(n), IRQ_HANDLERS_16(n+16)
 #define IRQ_HANDLERS_64(n) IRQ_HANDLERS_32(n), IRQ_HANDLERS_32(n+32)
     IRQ_HANDLERS_32(0x20),
-    IRQ_HANDLERS_32(0x40), IRQ_HANDLERS_32(0x60),
-    IRQ_HANDLERS_32(0x80), IRQ_HANDLERS_32(0xA0),
-    IRQ_HANDLERS_32(0xC0), IRQ_HANDLERS_32(0xE0),
+    IRQ_HANDLERS_64(0x40),
+    IRQ_HANDLERS_64(0x80),
+    IRQ_HANDLERS_64(0xC0),
 };
 
 static PhysAddr lapicPhys = 0;
@@ -211,4 +211,49 @@ void markRVExtInterruptHandled(unsigned int rvExtIRQ)
 
 	// TODO: How to ensure there's no race?
 	lapicWrite(0xB0, 0x00);
+}
+
+static struct {
+	uint16_t limit_lo;
+	uint16_t base_lo;
+	uint8_t base_mid;
+	uint8_t access;
+	uint8_t flags_limit;
+	uint8_t base_hi;
+} __attribute__((packed)) gdt[] = {
+	[0] = {},
+	[SegmentKernelCS/8] = { .limit_lo = 0xFFFF, .access = 0b10011011, .flags_limit = 0b10101111 }, // Ring 0 CS
+	[SegmentKernelDS/8] = { .limit_lo = 0xFFFF, .access = 0b10010011, .flags_limit = 0b10001111 }, // Ring 0 DS
+	[SegmentUserCS/8] = { .limit_lo = 0xFFFF, .access = 0b11111011, .flags_limit = 0b10101111 }, // Ring 3 CS
+	[SegmentUserDS/8] = { .limit_lo = 0xFFFF, .access = 0b11110011, .flags_limit = 0b10001111 }, // Ring 3 DS
+};
+
+void setupGDT()
+{
+	struct {
+		uint16_t limit;
+		uintptr_t pointer;
+	} __attribute__((packed)) gdtp = {
+		.limit = sizeof(gdt) - 1,
+		.pointer = (uintptr_t) &gdt,
+	};
+
+	// Load GDT
+	asm volatile("lgdt %[gdtp]" :: [gdtp] "m" (gdtp));
+
+	// Use lretq to far jump to the new CS
+	asm volatile("push %[cs]\n"
+	             "leaq 1f(%%rip), %%rax\n"
+	             "pushq %%rax\n"
+	             "lretq\n"
+	             "1:\n"
+	             :: [cs] "i" (SegmentKernelCS) : "flags", "memory", "rax");
+
+	// Reload data segment registers
+	asm volatile("mov %[ds], %%ds\n"
+	             "mov %[ds], %%es\n"
+	             "mov %[ds], %%fs\n"
+	             "mov %[ds], %%gs\n"
+	             "mov %[ds], %%ss\n"
+	             :: [ds] "r" (SegmentKernelDS) : "memory");
 }

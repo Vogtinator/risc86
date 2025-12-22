@@ -34,8 +34,7 @@ void kernel_entry(KernelParams *params)
 
 	runGlobalConstructors();
 
-	// Set up per-CPU state for the boot CPU
-	setupPerCPUState(0);
+	setupGDT();
 
 	printf("Kernel @ %lx len %lx\n", params->kernel_phys, params->kernel_len);
 	printf("Initrd @ %lx len %lx\n", params->initrd_phys, params->initrd_len);
@@ -51,10 +50,11 @@ void kernel_entry(KernelParams *params)
 	printf("Memory map at boot:\n");
 	physMemMgr.print();
 
-	// Hack: Reserve the zero page so that the first allocation is not at physical 0
-	// and some invalid pointers are more obvious. TODO: Or is it fine if the DTB
-	// just lives there?
-	physMemMgr.allocate(4096, MemRegionZeroPage);
+	// Reserve a trampoline page early to ensure it's in lowmem.
+	auto trampolinePage = physMemMgr.allocate(PAGE_SIZE, MemRegionTrampoline);
+
+	// Set up per-CPU state for the boot CPU. Must come after GDT setup.
+	setupPerCPUState(0);
 
 	setupACPI();
 
@@ -65,7 +65,9 @@ void kernel_entry(KernelParams *params)
 	setupHPET();
 
 	auto secondaryCallback = [](unsigned int cpuNum) {
-		// Setup per-CPU state for secondary cores
+		setupGDT();
+
+		// Setup per-CPU state for secondary cores. Must come after GDT setup.
 		setupPerCPUState(cpuNum);
 
 		setupInterruptsPerCPU();
@@ -82,7 +84,8 @@ void kernel_entry(KernelParams *params)
 		}
 	};
 
-	SMP::setupSMP(secondaryCallback);
+	// Before MMU context takeover: This needs identity mapping for the trampoline.
+	SMP::setupSMP(trampolinePage, secondaryCallback);
 
 	setupLAPICTimer();
 
@@ -103,7 +106,7 @@ void kernel_entry(KernelParams *params)
 	hart0->mode = Hart::MODE_SUPERVISOR;
 	hart0->regs[10] = SMP::cpuNumToHartID(0); // a0 = Hart ID
 	hart0->regs[11] = dtb; // a1 = phys addr of DT
-	hart0->pc = params->kernel_phys;
+	hart0->pc = kernel_params.kernel_phys;
 
 	hart0->run();
 
