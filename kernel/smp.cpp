@@ -8,7 +8,7 @@
 #include "utils.h"
 #include "x86interrupts.h"
 
-static uint8_t cpuNumToLAPICID[MAX_CPUS];
+static _Atomic(uint8_t) cpuNumToLAPICID[MAX_CPUS];
 
 /* Getting secondary cores to run kernel code is not easy on x86.
  * When they receive the startup command, they jump to (vector & 0xFF) << 12
@@ -131,7 +131,8 @@ extern "C" {
 	               smp_trampoline_reloc_gdtp[];
 	// Value of %cr3 to use.
 	extern uint32_t smp_trampoline_pml4;
-	// Incremented by each CPU that comes online (incl. CPU0, the BSP)
+	// Incremented by each CPU that comes online (incl. CPU0, the BSP).
+	// For assigning CPU numbers.
 	volatile uint32_t cpusOnline = 0;
 	// Called once long mode and stack are set up.
 	static void secondaryEntry(unsigned int cpuNum);
@@ -145,10 +146,15 @@ static uint8_t getLAPICID()
 
 static void (*secondaryCallbackGlobal)(unsigned int cpuNum);
 
+// Incremented once secondaryEntry has completed initialization
+static _Atomic(uint8_t) cpusReallyOnline = 0;
+
 __attribute__((used))
 static void secondaryEntry(unsigned int cpuNum)
 {
 	cpuNumToLAPICID[cpuNum] = getLAPICID();
+
+	cpusReallyOnline++;
 
 	secondaryCallbackGlobal(cpuNum);
 
@@ -233,7 +239,7 @@ void SMP::setupSMP(void (secondaryCallback)(unsigned int cpuNum))
 	relocAdd(trampoline + uintptr_t(smp_trampoline_reloc_gdtp) - uintptr_t(smp_trampoline));
 
 	// The BSP is CPU 0
-	cpusOnline = 1;
+	cpusReallyOnline = cpusOnline = 1;
 	cpuNumToLAPICID[0] = getLAPICID();
 
 	for (int i = 0; i < cpusFound; ++i) {
@@ -261,7 +267,8 @@ void SMP::setupSMP(void (secondaryCallback)(unsigned int cpuNum))
 	}
 
 	printf("Waiting for secondary CPUs to come online...\n");
-	while (cpusOnline < cpusFound) asm volatile("pause");
+	// Wait for secondaryEntry to complete initialization of all CPUs
+	while (cpusReallyOnline < cpusFound) asm volatile("pause");
 
 	printf("%u CPUs online!\n", numberOfCPUs());
 }
