@@ -90,6 +90,8 @@ cp <some initrd> build/efiloader/esp/initrd
 Design
 ---
 
+### Memory
+
 The emulator shares physical and virtual memory with the emulated operating system, so the memory layout had to be carefully designed: Only physical memory ranges not used by the emulator are passed to the emulated system.
 
 For virtual memory it's a bit more complex, as there's no control over the virtual address ranges used by the operating system. RISC86 makes use of the Sv39 virtual addressing scheme presented to the guest while using traditional 48-bit paging on the x86 side, so the full virtual memory can be used by both:
@@ -110,7 +112,21 @@ The native x86 code has 48 virtual address bits, allowing for wider ranges:
 
 The emulator uses the 0xFFFF800000000000 - 0xFFFFFFBFFFFFFFFF range for virtual addresses, which is valid for x86 but non-canonical for RISC-V.
 
-Other parts TBD.
+### Timer
+
+The RISC-V supervisor timer (stime, stimecmp) is a system-global timer source with fairly high resolution and per-hart compare registers.
+
+To get similar functionality on x86, multiple timers have to be combined: The HPET is both system-global as well as high-resolution, but does (usually) not have enough compare registers. It's also slow to access, so that should be avoided. Multiplexing the HPET comparators across all harts would be technically possible but slow. The Local APIC (LAPIC) timer is local to each x86 core, but does not have a documented frequency and lacks a count-up mode.
+
+For providing a time source (stime), the HPET is used directly. For generating interrupts, the per-CPU LAPIC timer is set based on the difference of the current HPET time (stime) and the next compare value match (stimecmp).
+
+### Interrupts
+
+Hart-local interrupts (timer, IPI) are directly translated to RISC-V supervisor mode interrupts by setting the corresponding bits in SIP from the x86 IRQ handler.
+
+For external interrupts, a range of x86 IRQs is reserved to be used for MSIs directly. It turns out the address and value format for x86 and IMSIC MSIs can match with specially crafted device-trees, so currently those are mapped 1:1. (In the future the MSI(-X) registers will be wrapped for more flexibility and to avoid that x86 vectors 0-31 are used).
+
+There is no support for legacy interrupts, so old PCI (pre PCI-Express) devices won't work.
 
 License
 ---

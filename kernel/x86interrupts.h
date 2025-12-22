@@ -6,6 +6,8 @@ enum x86IRQ {
 	// Mapped 1:1 to RV external interrupts
 	X86_IRQ_RV_FIRST = 32,
 	X86_IRQ_RV_LAST = 95,
+	// LAPIC timer
+	X86_IRQ_LAPIC_TIMER = 252,
 	// Mapped to RV supervisor software interrupts
 	X86_IRQ_RV_IPI = 253,
 	// For internal purposes like SBI functions

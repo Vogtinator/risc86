@@ -5,7 +5,6 @@
 
 #include "hpet.h"
 #include "loaderapi.h"
-#include "percpu.h"
 #include "rvmmu.h"
 #include "sbi.h"
 #include "utils.h"
@@ -61,16 +60,8 @@ void Hart::handleSRET()
 	this->lr_sc_pending = false;
 }
 
-_Atomic uint64_t Hart::global_time;
-
 void Hart::handlePendingInterrupts()
 {
-	// Supervisor timer interrupt
-	if (global_time >= this->stimecmp)
-		this->sip |= SIP_STIP;
-	else
-		this->sip &= ~SIP_STIP;
-
 	// IMSIC external interrupts
 	int extInt = 0;
 	// Find lowest pending external interrupt
@@ -288,7 +279,7 @@ uint64_t Hart::getCSR(uint16_t csr)
 	case 0x180u:
 		return this->satp;
 	case 0xc01u:
-		return global_time;
+		return hpetCurrentTime();
 	case 0xdb0u:
 		return this->stopi;
 	default:
@@ -336,6 +327,10 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 		return;
 	case 0x14du:
 		this->stimecmp = value;
+		this->sip &= ~SIP_STIP;
+		if (!lapicSetTimeout(this->stimecmp))
+			this->sip |= SIP_STIP;
+
 		return;
 	case 0x150u:
 		this->siselect = value;
@@ -1726,8 +1721,6 @@ void Hart::runInstruction(uint32_t inst)
 
 		// Immediately check for interrupts
 		this->pc += 4;
-		// TODO: Commented out for now to avoid slow HPET access...
-		// Ideally do this only when writing interrupt related CSRs.
 		this->handlePendingInterrupts();
 		return;
 	}
@@ -1741,15 +1734,10 @@ void Hart::runInstruction(uint32_t inst)
 void Hart::run()
 {
 	uint32_t counter = 0;
-	bool isCPU0 = getPerCPU()->cpu_id == 0;
 	for(;;)
 	{
-		if ((counter++ % 1024) == 0) {
-			if (isCPU0)
-				global_time += 16;
-
+		if ((counter++ % 1024) == 0)
 			this->handlePendingInterrupts();
-		}
 
 		// Fetch 16 bits at a time. Due to IALIGN=16, a 32-bit wide instruction
 		// may cross a page boundary and fault.

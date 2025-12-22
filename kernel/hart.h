@@ -87,9 +87,6 @@ struct Hart {
 	void run();
 
 private:
-	// Until there's a real timer
-	static _Atomic uint64_t global_time;
-
 	void handleInterrupt(uint64_t cause, uint64_t stval);
 	void handlePendingInterrupts();
 	void handleSRET();

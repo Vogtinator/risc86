@@ -44,7 +44,10 @@ static void irqHandler(InterruptFrame *frame, int irq)
 {
 	auto *hart = &getPerCPU()->hart;
 
-	if (irq >= X86_IRQ_RV_FIRST && irq <= X86_IRQ_RV_LAST) {
+	if (irq == X86_IRQ_LAPIC_TIMER) {
+		hart->sip |= SIP_STIP;
+		lapicWrite(0xB0, 0x00);
+	} else if (irq >= X86_IRQ_RV_FIRST && irq <= X86_IRQ_RV_LAST) {
 		static_assert(X86_IRQ_RV_LAST / 64 < sizeof(Hart::eip_64)/sizeof(Hart::eip_64[0]));
 		auto rvExtIRQ = x86IRQtoRVExtIRQ(irq);
 		if (rvExtIRQ / 64 >= sizeof(Hart::eip_64)/sizeof(Hart::eip_64[0]))

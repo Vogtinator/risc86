@@ -62,11 +62,15 @@ void kernel_entry(KernelParams *params)
 
 	setupInterrupts();
 
+	setupHPET();
+
 	auto secondaryCallback = [](unsigned int cpuNum) {
 		// Setup per-CPU state for secondary cores
 		setupPerCPUState(cpuNum);
 
 		setupInterruptsPerCPU();
+
+		setupLAPICTimer();
 
 		auto *hart = &getPerCPU()->hart;
 
@@ -80,7 +84,7 @@ void kernel_entry(KernelParams *params)
 
 	SMP::setupSMP(secondaryCallback);
 
-	//setupHPET();
+	setupLAPICTimer();
 
 	printf("Free mem: %lu MiB\n", physMemMgr.totalFreeBytes() / 1024 / 1024);
 
