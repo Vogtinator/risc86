@@ -90,6 +90,7 @@ static uint64_t sbiCall(Hart *hart, uint64_t *result)
 			if (otherHart->state != Hart::State::STOPPED)
 				return SBI_ERR_ALREADY_AVAILABLE; // The spec does not use SBI_ERR_ALREADY_STARTED here
 
+			otherHart->mode = Hart::MODE_SUPERVISOR;
 			otherHart->satp = 0;
 			otherHart->sstatus = 0;
 			otherHart->regs[10] = hartid;
