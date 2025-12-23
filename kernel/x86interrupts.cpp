@@ -54,9 +54,10 @@ static void irqHandler(InterruptFrame *frame, int irq)
 			panic("Unexpected IRQ %d", irq);
 
 		hart->eip_64[rvExtIRQ / 64] |= 1ul << (rvExtIRQ % 64);
+		// Acked by the hart thrugh void markRVExtInterruptHandled()
 	} else if (irq == X86_IRQ_RV_IPI) {
 		hart->sip |= SIP_SSIP;
-		lapicWrite(0xB0, 0x00);
+		// Acked by the hart thrugh void markRVIPIHandled()
 	} else if (irq == X86_IRQ_INTERNAL_IPI) {
 		if (hart->state == Hart::State::START_PENDING)
 			hart->state = Hart::State::STARTED;
@@ -196,7 +197,13 @@ void setupInterruptsPerCPU()
 	asm volatile("sti");
 }
 
-void markRVInterruptHandled(unsigned int rvExtIRQ)
+void markRVIPIHandled()
+{
+	// TODO: How to ensure there's no race?
+	lapicWrite(0xB0, 0x00);
+}
+
+void markRVExtInterruptHandled(unsigned int rvExtIRQ)
 {
 	unsigned int x86IRQ = rvExtIRQ;
 

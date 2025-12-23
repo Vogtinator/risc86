@@ -323,7 +323,11 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 		this->sepc = value;
 		return;
 	case 0x144u:
-		this->sip = value;
+		// Writing a zero to SSIP acks the IPI, other values kept
+		if ((this->sip & SIP_SSIP) && !(value & SIP_SSIP)) {
+			this->sip &= ~SIP_SSIP;
+			markRVIPIHandled();
+		}
 		return;
 	case 0x14du:
 		this->stimecmp = value;
@@ -355,7 +359,9 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 		break;
 	}
 	case 0x15c: {
-		markRVInterruptHandled(this->stopei >> 16);
+		if (this->stopei)
+			markRVExtInterruptHandled(this->stopei >> 16);
+
 		this->stopei = 0;
 		break;
 	} case 0x180u:
@@ -1637,10 +1643,18 @@ void Hart::runInstruction(uint32_t inst)
 				return;
 			} else if (inst == 0x10500073) { // wfi
 				this->pc += 4;
-				handlePendingInterrupts();
-				// TODO: What if this races? We only have edge triggered interrupts.
-				if (this->stopi == 0)
-					asm ("hlt");
+
+				// While no interrupt pending...
+				while (this->stopi == 0) {
+					asm volatile ("cli"); // Make this section atomic
+					handlePendingInterrupts(); // Check if an interrupt happened meanwhile
+					if (this->stopi == 0) { // If not, wait
+						// Magic: sti is delayed, so any pending interrupt will break out of hlt.
+						asm volatile("sti; hlt");
+						handlePendingInterrupts();
+					} else // It did -> resume execution
+						asm volatile("sti");
+				}
 
 				return;
 			} else

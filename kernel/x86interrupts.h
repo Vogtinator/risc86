@@ -18,6 +18,7 @@ enum x86IRQ {
 __attribute__((no_caller_saved_registers))
 void lapicWrite(uint32_t offset, uint32_t value);
 uint32_t lapicRead(uint32_t offset);
-void markRVInterruptHandled(unsigned int rvExtIRQ);
+void markRVExtInterruptHandled(unsigned int rvExtIRQ);
+void markRVIPIHandled();
 void setupInterrupts();
 void setupInterruptsPerCPU();
