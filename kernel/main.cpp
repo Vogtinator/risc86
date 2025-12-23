@@ -64,6 +64,9 @@ void kernel_entry(KernelParams *params)
 
 	setupHPET();
 
+	for (unsigned int i = 0; i < MAX_CPUS; ++i)
+		getPerCPUForOtherCPU(i)->x86mmu.init();
+
 	auto secondaryCallback = [](unsigned int cpuNum) {
 		setupGDT();
 
@@ -73,6 +76,8 @@ void kernel_entry(KernelParams *params)
 		setupInterruptsPerCPU();
 
 		setupLAPICTimer();
+
+		getPerCPU()->x86mmu.resetContext();
 
 		auto *hart = &getPerCPU()->hart;
 
@@ -88,6 +93,8 @@ void kernel_entry(KernelParams *params)
 	SMP::setupSMP(trampolinePage, secondaryCallback);
 
 	setupLAPICTimer();
+
+	getPerCPU()->x86mmu.resetContext();
 
 	printf("Free mem: %lu MiB\n", physMemMgr.totalFreeBytes() / 1024 / 1024);
 

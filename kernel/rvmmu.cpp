@@ -19,11 +19,11 @@ TranslationResult mmu_translate(Hart *hart, uint64_t addr, AccessType type)
 	if (mode == 0) {
 		// Identity map: Return a 1GiB region that contains the address.
 		uint64_t mask_1gb = (1UL << 30) - 1;
-		TranslationResult ret = {
+		return TranslationResult {
 			.pageoff_mask = mask_1gb,
 			.phys_page_addr = (addr & ~mask_1gb),
+			.canRead = true, .canWrite = true, .canExec = true, .canUser = true,
 		};
-		return ret;
 	}
 
 	if (mode != 8)
@@ -60,8 +60,13 @@ TranslationResult mmu_translate(Hart *hart, uint64_t addr, AccessType type)
 			continue;
 		}
 
+		bool canRead = (pte & PTE_R) && (pte & PTE_A);
+		bool canWrite = (pte & PTE_W) && (pte & PTE_A) && (pte & PTE_D);
+		bool canExec = (pte & PTE_X) && (pte & PTE_A);
+		bool canUser = (pte & PTE_U);
+
 		// TODO: SUM bit?
-		if (hart->mode == Hart::MODE_USER && !(pte & PTE_U))
+		if (hart->mode == Hart::MODE_USER && !canUser)
 			return fault(); // User mode access denied
 
 		// Check based on access type and AD bits
@@ -70,13 +75,13 @@ TranslationResult mmu_translate(Hart *hart, uint64_t addr, AccessType type)
 		switch (type)
 		{
 		case AccessType::Read:
-			allowed = (pte & PTE_R) && (pte & PTE_A);
+			allowed = canRead;
 			break;
 		case AccessType::Write:
-			allowed = (pte & PTE_W) && (pte & PTE_A) && (pte & PTE_D);
+			allowed = canWrite;
 			break;
 		case AccessType::Exec:
-			allowed = (pte & PTE_X) && (pte & PTE_A);
+			allowed = canExec;
 			break;
 		}
 
@@ -93,6 +98,8 @@ TranslationResult mmu_translate(Hart *hart, uint64_t addr, AccessType type)
 		return TranslationResult {
 			.pageoff_mask = pageoff_mask,
 			.phys_page_addr = PhysAddr(ppn),
+			.canRead = canRead, .canWrite = canWrite, .canExec = canExec,
+			.canUser = canUser,
 		};
 	}
 

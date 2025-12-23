@@ -5,6 +5,7 @@
 
 #include "hpet.h"
 #include "loaderapi.h"
+#include "percpu.h"
 #include "rvmmu.h"
 #include "sbi.h"
 #include "utils.h"
@@ -35,6 +36,9 @@ void Hart::handleInterrupt(uint64_t cause, uint64_t stval)
 
 	this->sstatus = sstatus;
 	this->pc = this->stvec;
+	if (this->mode != Hart::MODE_SUPERVISOR)
+		getPerCPU()->x86mmu.switchPrivileges(X86MMU::Priv::Supervisor);
+
 	this->mode = Hart::MODE_SUPERVISOR;
 	this->lr_sc_pending = false;
 }
@@ -50,7 +54,11 @@ void Hart::handleSRET()
 		sstatus &= ~SSTATUS_SIE;
 
 	// Go into sstatus.spp mode
+	auto oldMode = this->mode;
 	this->mode = (sstatus & SSTATUS_SPP) ? Hart::MODE_SUPERVISOR : Hart::MODE_USER;
+	if (this->mode != oldMode)
+		getPerCPU()->x86mmu.switchPrivileges(this->mode == Hart::MODE_SUPERVISOR
+		                                     ? X86MMU::Priv::Supervisor : X86MMU::Priv::User);
 
 	// Set sstatus.spp to U
 	sstatus &= ~SSTATUS_SPP;
@@ -98,7 +106,7 @@ void Hart::handlePendingInterrupts()
 		handleInterrupt(Hart::SCAUSE_INTERRUPT_BASE + hartInterrupt, 0);
 }
 
-
+#if MMU_EMULATION
 // Perform an instruction fetch of 16 bits at the given addr.
 // Returns false on fault.
 __attribute__((warn_unused_result))
@@ -126,6 +134,32 @@ bool Hart::fetchInstruction(uint16_t *inst, uint64_t addr)
 	*inst = *phys_to_virt<uint16_t>(phys);
 	return true;
 }
+#else
+// Perform an instruction fetch of 16 bits at the given addr.
+// Returns false on fault.
+__attribute__((warn_unused_result))
+bool Hart::fetchInstruction(uint16_t *inst, uint64_t addr)
+{
+	if (addr & (sizeof(uint16_t) - 1))
+		panic("Unaligned instruction fetch");
+
+	uint16_t res = 0;
+	bool fault;
+	asm volatile("clc\n" // Clear carry flag
+	             "movw (%[addr]), %[res]\n" // Perform move
+	             "setc %[fault]" // Carry flag set by fault handler? -> Fault
+	             : [res] "=a" (res), [fault] "=r" (fault)
+	             : [addr] "d" (addr) : "flags");
+
+	if (fault) {
+		handleInterrupt(Hart::SCAUSE_INSTR_PAGE_FAULT, addr);
+		return false;
+	}
+
+	*inst = res;
+	return true;
+}
+#endif
 
 // TODO: Use native mov with trap here
 template <typename T> __attribute__((warn_unused_result))
@@ -365,10 +399,11 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 		this->stopei = 0;
 		break;
 	} case 0x180u:
-		if ((value >> 60) == 0 || (value >> 60) == 8) // Only bare or Sv39
+		if ((value >> 60) == 0 || (value >> 60) == 8) { // Only bare or Sv39
 			this->satp = value;
-		else
-			dump();
+			getPerCPU()->x86mmu.resetContext();
+		} else
+			panic("Unsupported SATP value %lx", value);
 		return;
 	default:
 		panic("Unknown CSR write 0x%03x", csr);

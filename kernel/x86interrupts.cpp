@@ -4,24 +4,27 @@
 #include "x86interrupts.h"
 #include "mem.h"
 #include "percpu.h"
+#include "rvmmu.h"
 #include "uacpi/acpi.h"
 #include "uacpi/tables.h"
 #include "utils.h"
 
 // Frame as pushed by the CPU and passed to
-// functions with __attribute__((interrupt))
+// functions with __attribute__((interrupt)).
+// Members have to be volatile, otherwise writes
+// get optimized away.
 struct InterruptFrame
 {
-	uint64_t ip;
-	uint64_t cs;
-	uint64_t flags;
-	uint64_t sp;
-	uint64_t ss;
+	volatile uint64_t ip;
+	volatile uint64_t cs;
+	volatile uint64_t flags;
+	volatile uint64_t sp;
+	volatile uint64_t ss;
 };
 
 // x86 can't use vectors 0-31 for external interrupts,
 // so shift RISC-V interrupts by 32.
-__attribute__((no_caller_saved_registers))
+CALLED_FROM_IRQ
 static uint8_t x86IRQtoRVExtIRQ(uint8_t x86IRQ)
 {
 	// TODO: Kernel patched to not need shifting.
@@ -39,7 +42,7 @@ static uint8_t rvExtIRQtoX86IRQ(unsigned int rvIRQ)
 	//return x86IRQ + X86_IRQ_RV_FIRST;
 }
 
-__attribute__((no_caller_saved_registers))
+CALLED_FROM_IRQ
 static void irqHandler(InterruptFrame *frame, int irq)
 {
 	auto *hart = &getPerCPU()->hart;
@@ -83,6 +86,54 @@ static void irqHandler(InterruptFrame *frame)
 	return irqHandler(frame, irq);
 }
 
+__attribute__((interrupt)) __attribute__((target("general-regs-only")))
+static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
+{
+	// Get the fault address from CR2
+	uint64_t addr;
+	asm("mov %%cr2, %[addr]" : [addr] "=r" (addr));
+
+	uint64_t sign = int64_t(addr) >> 39;
+	if ((sign != 0 && ~sign != 0) || (errorCode & ~0b111))
+		panic("Unexpected page fault for address %lx at %lx", addr, frame->ip);
+
+	bool pagePresent = errorCode & 0b001, isWrite = errorCode & 0b010;
+
+	auto *hart = &getPerCPU()->hart;
+	auto translationResult = mmu_translate(hart, addr, isWrite ? AccessType::Write : AccessType::Read);
+
+	bool isFault = false;
+
+	if (translationResult.pageoff_mask) {
+		getPerCPU()->x86mmu.addRVMapping(addr, &translationResult);
+	} else {
+		isFault = true;
+	}
+
+	// Set the Carry flag on fault and advance, clear it otherwise
+	if (isFault) {
+		// Find which instruction caused the fault to get its length.
+		// Proper decoding not needed here, the set of possible instructions
+		// is known.
+		const uint64_t faultInsn = *(uint64_t*)(frame->ip);
+		unsigned int faultInsnLen;
+		if ((faultInsn & 0xFFFFFF) == 0x028b66) // mov (%rdi), %ax
+			faultInsnLen = 3;
+		else
+			panic("Unexpected instruction in fault handler: %lx at %lx", faultInsn, frame->ip);
+
+		// Skip the faulting instruction and set the
+		frame->ip += faultInsnLen;
+		frame->flags |= 1ul << 0;
+	} else {
+		// Retry the instruction.
+		// Carry should be clear already.
+		// frame->flags &= ~(1ul << 0);
+	}
+
+	return;
+}
+
 __attribute__((interrupt))
 static void doubleFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 {
@@ -115,8 +166,9 @@ struct IDTEntry {
 	IDTEntry() {}
 } __attribute__ ((packed));
 
-static IDTEntry idt[] = {
+static const IDTEntry idt[] = {
     [0x08] = IDTEntry{doubleFaultHandler},
+    [0x0e] = IDTEntry{pageFaultHandler},
 #define IRQ_HANDLER(n) [n] = IDTEntry{irqHandler<n>}
 #define IRQ_HANDLERS_2(n) IRQ_HANDLER(n), IRQ_HANDLER(n+1)
 #define IRQ_HANDLERS_4(n) IRQ_HANDLERS_2(n), IRQ_HANDLERS_2(n+2)
@@ -133,7 +185,6 @@ static IDTEntry idt[] = {
 static PhysAddr lapicPhys = 0;
 static volatile uint32_t *lapic = nullptr;
 
-__attribute__((no_caller_saved_registers))
 void lapicWrite(uint32_t offset, uint32_t value)
 {
 	lapic[offset / 4] = value;

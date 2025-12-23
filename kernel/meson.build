@@ -78,6 +78,7 @@ kernel = executable(
         'smp.cpp',
         'utils.cpp',
         'x86interrupts.cpp',
+        'x86mmu.cpp',
     ],
     cpp_args: cpp_args,
     pie: true,

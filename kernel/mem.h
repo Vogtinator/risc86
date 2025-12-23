@@ -10,7 +10,7 @@ using VirtAddr = void*;
 static const size_t PAGE_SIZE = 4096;
 
 template <typename T>
-static T *phys_to_virt(uint64_t addr)
+static inline T *phys_to_virt(uint64_t addr)
 {
 	return reinterpret_cast<T*>(KERNEL_PHYS_START + addr);
 }

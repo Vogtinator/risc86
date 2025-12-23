@@ -2,6 +2,10 @@
 
 #include <stdint.h>
 
+// general-regs-only shouldn't be necessary, but there's some issue
+// with a misaligned stack which causes movaps to fault.
+#define CALLED_FROM_IRQ __attribute__((no_caller_saved_registers)) __attribute__((target("general-regs-only")))
+
 enum x86IRQ {
 	// Mapped 1:1 to RV external interrupts
 	X86_IRQ_RV_FIRST = 32,
@@ -15,8 +19,7 @@ enum x86IRQ {
 	X86_IRQ_SPURIOUS = 255,
 };
 
-__attribute__((no_caller_saved_registers))
-void lapicWrite(uint32_t offset, uint32_t value);
+CALLED_FROM_IRQ void lapicWrite(uint32_t offset, uint32_t value);
 uint32_t lapicRead(uint32_t offset);
 void markRVExtInterruptHandled(unsigned int rvExtIRQ);
 void markRVIPIHandled();

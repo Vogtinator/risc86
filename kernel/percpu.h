@@ -1,12 +1,14 @@
 #pragma once
 
 #include "hart.h"
+#include "x86mmu.h"
 
 // There is one instance of this struct per cpu.
 // The PerCpuState for a CPU can always be accessed
 // by calling getPerCPU() on that CPU.
 struct PerCpuState {
 	struct Hart hart;
+	X86MMU x86mmu;
 	unsigned int cpu_id;
 };
 

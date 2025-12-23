@@ -22,6 +22,7 @@ enum MemoryRegionType {
 	// Reserved memory is just omitted from the list
 
 	MemRegionTrampoline, // Used for SMP startup
+	MemRegionPageTables, // Used for host paging structures
 };
 
 // Packed to avoid ABI mismatches between EFI and Kernel
