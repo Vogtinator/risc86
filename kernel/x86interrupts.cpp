@@ -57,10 +57,14 @@ static void irqHandler(InterruptFrame *frame, int irq)
 			panic("Unexpected IRQ %d", irq);
 
 		hart->eip_64[rvExtIRQ / 64] |= 1ul << (rvExtIRQ % 64);
-		// Acked by the hart thrugh void markRVExtInterruptHandled()
+		// TODO: EOI should only be sent in markRVExtInterruptHandled(),
+		// but interrupts are enabled so by then another higher prio IRQ might've taken over
+		// and the EOI acks the wrong one.
+		lapicWrite(0xB0, 0x00);
 	} else if (irq == X86_IRQ_RV_IPI) {
 		hart->sip |= SIP_SSIP;
-		// Acked by the hart thrugh void markRVIPIHandled()
+		// TODO: Like above, EOI should only be sent in markRVIPIHandled().
+		lapicWrite(0xB0, 0x00);
 	} else if (irq == X86_IRQ_INTERNAL_IPI) {
 		if (hart->state == Hart::State::START_PENDING)
 			hart->state = Hart::State::STARTED;
@@ -76,7 +80,6 @@ static void irqHandler(InterruptFrame *frame, int irq)
 
 		lapicWrite(0xB0, 0x00);
 	} else if (irq == X86_IRQ_SPURIOUS) {
-		// lapicWrite(0xB0, 0x00); needed?
 		return;
 	} else {
 		panic("Unexpected IRQ %d", irq);
@@ -272,7 +275,7 @@ void setupInterruptsPerCPU()
 void markRVIPIHandled()
 {
 	// TODO: How to ensure there's no race?
-	lapicWrite(0xB0, 0x00);
+	//lapicWrite(0xB0, 0x00);
 }
 
 void markRVExtInterruptHandled(unsigned int rvExtIRQ)
@@ -282,7 +285,7 @@ void markRVExtInterruptHandled(unsigned int rvExtIRQ)
 	getPerCPU()->hart.eip_64[rvExtIRQ / 64] &= ~(1ul << (rvExtIRQ % 64));
 
 	// TODO: How to ensure there's no race?
-	lapicWrite(0xB0, 0x00);
+	//lapicWrite(0xB0, 0x00);
 }
 
 static struct {
