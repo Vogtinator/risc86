@@ -79,6 +79,21 @@ struct Hart {
 		START_PENDING = 2,
 	} state = Hart::State::STOPPED;
 
+	// For implementing SBI RFENCE:
+	// * At Idle initially
+	// * SBI call on the sending hart sets it to Requesting
+	// * Sending hart sets rfence_addr and rfence_size
+	// * Sending hart sends an IPI
+	// * Receiving hart acts and sets it to Completed
+	// * Sending hart sets it back to Idle
+	_Atomic enum class RFenceState {
+		Idle = 0,
+		Requesting,
+		Requested,
+		Completed,
+	} rfence_state;
+	_Atomic uint64_t rfence_addr, rfence_size;
+
 	// For LR/SC emulation
 	bool lr_sc_pending;
 	uint64_t lr_sc_address, lr_sc_value;

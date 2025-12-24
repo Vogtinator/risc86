@@ -106,6 +106,32 @@ void Hart::handlePendingInterrupts()
 		handleInterrupt(Hart::SCAUSE_INTERRUPT_BASE + hartInterrupt, 0);
 }
 
+template <typename T> __attribute__((warn_unused_result))
+bool Hart::virtWritePtr(uint64_t addr, T **ptr)
+{
+	if (addr & (sizeof(T) - 1)) {
+		if (!this->satp) {
+			// The kernel has unaligned relocs and writes to them
+			// directly with misaligned writes. Faulting here
+			// results in an endless loop.
+		} else {
+			printf("Unaligned write\n");
+			handleInterrupt(Hart::SCAUSE_STORE_MISALIGN, addr);
+			return false;
+		}
+	}
+
+	auto res = mmu_translate(this, addr, AccessType::Write);
+	if (!res.pageoff_mask) {
+		handleInterrupt(Hart::SCAUSE_STORE_PAGE_FAULT, addr);
+		return false;
+	}
+
+	PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
+	*ptr = phys_to_virt<T>(phys);
+	return true;
+}
+
 #if MMU_EMULATION
 // Perform an instruction fetch of 16 bits at the given addr.
 // Returns false on fault.
@@ -134,6 +160,38 @@ bool Hart::fetchInstruction(uint16_t *inst, uint64_t addr)
 	*inst = *phys_to_virt<uint16_t>(phys);
 	return true;
 }
+
+// TODO: Use native mov with trap here
+template <typename T> __attribute__((warn_unused_result))
+bool Hart::virtRead(uint64_t addr, T *value)
+{
+	if (addr & (sizeof(T) - 1)) {
+		printf("Unaligned read\n");
+		handleInterrupt(Hart::SCAUSE_LOAD_MISALIGN, addr);
+		return false;
+	}
+
+	auto res = mmu_translate(this, addr, AccessType::Read);
+	if (!res.pageoff_mask) {
+		handleInterrupt(Hart::SCAUSE_LOAD_PAGE_FAULT, addr);
+		return false;
+	}
+
+	PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
+	*value = *phys_to_virt<T>(phys);
+	return true;
+}
+
+template <typename T> __attribute__((warn_unused_result))
+bool Hart::virtWrite(uint64_t addr, T value)
+{
+	T *ptr;
+	if (!virtWritePtr(addr, &ptr))
+		return false;
+
+	*ptr = value;
+	return true;
+}
 #else
 // Perform an instruction fetch of 16 bits at the given addr.
 // Returns false on fault.
@@ -159,11 +217,9 @@ bool Hart::fetchInstruction(uint16_t *inst, uint64_t addr)
 	*inst = res;
 	return true;
 }
-#endif
 
-// TODO: Use native mov with trap here
 template <typename T> __attribute__((warn_unused_result))
-bool Hart::virtRead(uint64_t addr, T *value)
+bool Hart::virtRead(uint64_t addr, T *valuePtr)
 {
 	if (addr & (sizeof(T) - 1)) {
 		printf("Unaligned read\n");
@@ -171,19 +227,37 @@ bool Hart::virtRead(uint64_t addr, T *value)
 		return false;
 	}
 
-	auto res = mmu_translate(this, addr, AccessType::Read);
-	if (!res.pageoff_mask) {
+	if (this->mode == Hart::MODE_USER) {
+		auto res = mmu_translate(this, addr, AccessType::Read);
+		if (!res.pageoff_mask) {
+			handleInterrupt(Hart::SCAUSE_LOAD_PAGE_FAULT, addr);
+			return false;
+		}
+
+		PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
+		*valuePtr = *phys_to_virt<T>(phys);
+		return true;
+	}
+
+	T value;
+	bool fault;
+	asm volatile("clc\n" // Clear carry flag
+	             "mov (%[addr]), %[value]\n" // Perform move
+	             "setc %[fault]" // Carry flag set by fault handler? -> Fault
+	             : [value] "=a" (value), [fault] "=r" (fault)
+	             : [addr] "d" (addr) : "flags");
+
+	if (fault) {
 		handleInterrupt(Hart::SCAUSE_LOAD_PAGE_FAULT, addr);
 		return false;
 	}
 
-	PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
-	*value = *phys_to_virt<T>(phys);
+	*valuePtr = value;
 	return true;
 }
 
 template <typename T> __attribute__((warn_unused_result))
-bool Hart::virtWritePtr(uint64_t addr, T **ptr)
+bool Hart::virtWrite(uint64_t addr, T value)
 {
 	if (addr & (sizeof(T) - 1)) {
 		if (!this->satp) {
@@ -197,27 +271,33 @@ bool Hart::virtWritePtr(uint64_t addr, T **ptr)
 		}
 	}
 
-	auto res = mmu_translate(this, addr, AccessType::Write);
-	if (!res.pageoff_mask) {
+	if (this->mode == MODE_USER) {
+		auto res = mmu_translate(this, addr, AccessType::Write);
+		if (!res.pageoff_mask) {
+			handleInterrupt(Hart::SCAUSE_STORE_PAGE_FAULT, addr);
+			return false;
+		}
+
+		PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
+		*phys_to_virt<T>(phys) = value;
+		return true;
+	}
+
+	bool fault;
+	asm volatile("clc\n" // Clear carry flag
+	             "mov %[value], (%[addr])\n" // Perform move
+	             "setc %[fault]" // Carry flag set by fault handler? -> Fault
+	             : [fault] "=r" (fault)
+	             : [value] "a" (value), [addr] "d" (addr) : "flags", "memory");
+
+	if (fault) {
 		handleInterrupt(Hart::SCAUSE_STORE_PAGE_FAULT, addr);
 		return false;
 	}
 
-	PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
-	*ptr = phys_to_virt<T>(phys);
 	return true;
 }
-
-template <typename T> __attribute__((warn_unused_result))
-bool Hart::virtWrite(uint64_t addr, T value)
-{
-	T *ptr;
-	if (!virtWritePtr(addr, &ptr))
-		return false;
-
-	*ptr = value;
-	return true;
-}
+#endif
 
 // Dump Hart state using printf
 void Hart::dump()
@@ -1670,8 +1750,17 @@ void Hart::runInstruction(uint32_t inst)
 					break;
 				}
 				panic("ebreak");
-			} else if ((inst & 0b1111111'00000'00000'111'11111'1111111) == 0b0001001'00000'00000'000'00000'1110011) {
-				//printf("Doing some fencing\n");
+			} else if ((inst & 0b1111111'00000'00000'111'11111'1111111) == 0b0001001'00000'00000'000'00000'1110011) { // sfence.vma
+				uint32_t rs1 = (inst >> 15) & 31;
+				uint32_t rs2 = (inst >> 20) & 31;
+
+				//printf("Doing some fencing for %lx\n", getReg(rs1));
+
+				(void) rs2; // No ASID support
+				if (rs1 == 0)
+					getPerCPU()->x86mmu.resetContext();
+				else
+					getPerCPU()->x86mmu.flushRVMappingAtomic(getReg(rs1), PAGE_SIZE);
 			} else if (inst == 0x10200073) {
 				this->handleSRET();
 				this->handlePendingInterrupts();

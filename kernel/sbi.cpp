@@ -1,3 +1,5 @@
+#include <stdint.h>
+#include <stdatomic.h>
 #include <stdio.h>
 
 #include "sbi.h"
@@ -124,8 +126,59 @@ static uint64_t sbiCall(Hart *hart, uint64_t *result)
 
 		break;
 	case SBI_EXT_RFNC:
-		// For now completely ignored
-		return SBI_SUCCESS;
+		switch (func) {
+		case 0: // remote_fence_i
+			return SBI_SUCCESS; // Ignored for now
+		case 1: // remote_sfence_vma
+		case 2: // remote_sfence_vma_asid
+		{
+			uint64_t hart_mask = hart->regs[10], hart_mask_base = hart->regs[11],
+			         start_addr = hart->regs[12], size = hart->regs[13],
+			         asid = hart->regs[14];
+
+			(void) asid; // Ignored for now
+
+			for (int hartBit = 0; hartBit < 64; ++hartBit) {
+				if ((hart_mask & (1ul << hartBit)) == 0)
+					continue;
+
+				auto hartID = hart_mask_base + hartBit;
+				int otherCPUNum = SMP::hartIDToCPUNum(hartID);
+				if (otherCPUNum < 0)
+					return SBI_ERR_INVALID_PARAM;
+
+				auto *otherHart = &getPerCPUForOtherCPU(otherCPUNum)->hart;
+
+				// Try to set Idle -> Requesting
+				for (;;) {
+					Hart::RFenceState rfenceIdle = Hart::RFenceState::Idle;
+					if (atomic_compare_exchange_weak(&otherHart->rfence_state, &rfenceIdle, Hart::RFenceState::Requesting))
+						break;
+					else
+						asm volatile("pause");
+				}
+
+				// Set values
+				otherHart->rfence_addr = start_addr;
+				otherHart->rfence_size = size;
+				// Set state to Requested
+				otherHart->rfence_state = Hart::RFenceState::Requested;
+				// Send IPI
+				SMP::sendIPI(hartID, X86_IRQ_INTERNAL_IPI);
+
+				// Wait for completion
+				while (otherHart->rfence_state != Hart::RFenceState::Completed)
+					asm volatile("pause");
+
+				// Set back to Idle
+				otherHart->rfence_state = Hart::RFenceState::Idle;
+			}
+
+			return SBI_SUCCESS;
+		}
+		default:
+			break;
+		}
 		break;
 	case 0x5D: // Used by riscv-tests
 		if (hart->regs[10])

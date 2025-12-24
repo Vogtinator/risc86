@@ -64,7 +64,14 @@ static void irqHandler(InterruptFrame *frame, int irq)
 	} else if (irq == X86_IRQ_INTERNAL_IPI) {
 		if (hart->state == Hart::State::START_PENDING)
 			hart->state = Hart::State::STARTED;
-		else
+		else if (hart->rfence_state == Hart::RFenceState::Requested) {
+			if (hart->rfence_size == ~0ul || (hart->rfence_addr == 0 && hart->rfence_size == 0))
+				getPerCPU()->x86mmu.resetContext();
+			else
+				getPerCPU()->x86mmu.flushRVMapping(hart->rfence_addr, hart->rfence_size);
+
+			hart->rfence_state = Hart::RFenceState::Completed;
+		} else
 			panic("IPI for unknown cause\n");
 
 		lapicWrite(0xB0, 0x00);
@@ -117,8 +124,22 @@ static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 		// is known.
 		const uint64_t faultInsn = *(uint64_t*)(frame->ip);
 		unsigned int faultInsnLen;
-		if ((faultInsn & 0xFFFFFF) == 0x028b66) // mov (%rdi), %ax
+		if ((faultInsn & 0xFFFFFF) == 0x028b48) // mov (%rdx), %rax
 			faultInsnLen = 3;
+		else if ((faultInsn & 0xFFFF) == 0x028b) // mov (%rdx), %eax
+			faultInsnLen = 2;
+		else if ((faultInsn & 0xFFFFFF) == 0x028b66) // mov (%rdx), %ax
+			faultInsnLen = 3;
+		else if ((faultInsn & 0xFFFF) == 0x028a) // mov (%rdx), %al
+			faultInsnLen = 2;
+		else if ((faultInsn & 0xFFFFFF) == 0x028948) // mov %rax, (%rdx)
+			faultInsnLen = 3;
+		else if ((faultInsn & 0xFFFF) == 0x0289) // mov %eax, (%rdx)
+			faultInsnLen = 2;
+		else if ((faultInsn & 0xFFFFFF) == 0x028966) // mov %ax, (%rdx)
+			faultInsnLen = 3;
+		else if ((faultInsn & 0xFFFF) == 0x0288) // mov %al, (%rdx)
+			faultInsnLen = 2;
 		else
 			panic("Unexpected instruction in fault handler: %lx at %lx", faultInsn, frame->ip);
 
