@@ -70,7 +70,7 @@ static UINTN *allocPageTable()
 typedef enum {
 	PT_PRESENT    = 1 << 0,
 	PT_WRITABLE   = 1 << 1,
-	PT_SUPERVISOR = 1 << 2,
+	PT_USER       = 1 << 2,
 	PT_HUGEPAGE   = 1 << 7,
 	PT_NOEXEC     = 1ULL << 63,
 } PageTableFlags;
@@ -95,7 +95,7 @@ static EFI_STATUS mmapOne(UINTN phys, UINTN virt, UINTN size, PageTableFlags fla
 		if (!pdpt)
 			return EFI_OUT_OF_RESOURCES;
 
-		*pml4e = (EFI_PHYSICAL_ADDRESS) pdpt | PT_PRESENT | PT_WRITABLE;
+		*pml4e = (EFI_PHYSICAL_ADDRESS) pdpt | PT_PRESENT | PT_WRITABLE | PT_USER;
 	}
 
 	UINTN *pdpte = &pdpt[(virt >> 30) & 0x1FF];
@@ -117,7 +117,7 @@ static EFI_STATUS mmapOne(UINTN phys, UINTN virt, UINTN size, PageTableFlags fla
 		if (!pd)
 			return EFI_OUT_OF_RESOURCES;
 
-		*pdpte = (EFI_PHYSICAL_ADDRESS) pd | PT_PRESENT | PT_WRITABLE;
+		*pdpte = (EFI_PHYSICAL_ADDRESS) pd | PT_PRESENT | PT_WRITABLE | PT_USER;
 	}
 
 	UINTN *pde = &pd[(virt >> 21) & 0x1FF];
@@ -139,7 +139,7 @@ static EFI_STATUS mmapOne(UINTN phys, UINTN virt, UINTN size, PageTableFlags fla
 		if (!pt)
 			return EFI_OUT_OF_RESOURCES;
 
-		*pde = (EFI_PHYSICAL_ADDRESS) pt | PT_PRESENT | PT_WRITABLE;
+		*pde = (EFI_PHYSICAL_ADDRESS) pt | PT_PRESENT | PT_WRITABLE | PT_USER;
 	}
 
 	UINTN *pte = &pt[(virt >> 12) & 0x1FF];
@@ -325,13 +325,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 			return EFI_OUT_OF_RESOURCES;
 
 		// Map stack
-		Status = mmap(stackPhys, KERNEL_STACK_LOW + cpu * KERNEL_STACK_CPU_OFFSET, KERNEL_STACK_SIZE, PT_NOEXEC | PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
+		Status = mmap(stackPhys, KERNEL_STACK_LOW + cpu * KERNEL_STACK_CPU_OFFSET, KERNEL_STACK_SIZE, PT_NOEXEC | PT_USER | PT_WRITABLE | PT_PRESENT);
 		if (EFI_ERROR(Status))
 			return Status;
 	}
 
 	// Map kernel
-	Status = mmap((EFI_PHYSICAL_ADDRESS) &kernel, KERNEL_LOAD_ADDR, (sizeof(kernel) + 0xFFF) & ~0xFFFULL, PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
+	Status = mmap((EFI_PHYSICAL_ADDRESS) &kernel, KERNEL_LOAD_ADDR, (sizeof(kernel) + 0xFFF) & ~0xFFFULL, PT_USER | PT_WRITABLE | PT_PRESENT);
 	if (EFI_ERROR(Status))
 		return Status;
 
@@ -371,26 +371,26 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 		return EFI_INVALID_PARAMETER;
 
 	// Perform identity map so that paging can be enabled
-	Status = mmap(0, 0, phys_addr_max, PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
+	Status = mmap(0, 0, phys_addr_max, PT_USER | PT_WRITABLE | PT_PRESENT);
 	if (EFI_ERROR(Status))
 		return Status;
 
 	// Map physical memory into kernel space
-	Status = mmap(0, KERNEL_PHYS_START, phys_addr_max, PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
+	Status = mmap(0, KERNEL_PHYS_START, phys_addr_max, PT_USER | PT_WRITABLE | PT_PRESENT);
 	if (EFI_ERROR(Status))
 		return Status;
 
 	// Hack: Map QEMU PCI memory
 	// TODO: Remove once the kernel handles page faults dynamically
-	Status = mmap(0xc000000000ul, KERNEL_PHYS_START + 0xc000000000ul, 0x100000000ul, PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
+	Status = mmap(0xc000000000ul, KERNEL_PHYS_START + 0xc000000000ul, 0x100000000ul, PT_USER | PT_WRITABLE | PT_PRESENT);
 	if (EFI_ERROR(Status))
 		return Status;
 
-	Status = mmap(0x38000000000ul, KERNEL_PHYS_START + 0x38000000000ul, 0x100000000ul, PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
+	Status = mmap(0x38000000000ul, KERNEL_PHYS_START + 0x38000000000ul, 0x100000000ul, PT_USER | PT_WRITABLE | PT_PRESENT);
 	if (EFI_ERROR(Status))
 		return Status;
 
-	Status = mmap(0x380000000000ul, KERNEL_PHYS_START + 0x380000000000ul, 0x100000000ul, PT_SUPERVISOR | PT_WRITABLE | PT_PRESENT);
+	Status = mmap(0x380000000000ul, KERNEL_PHYS_START + 0x380000000000ul, 0x100000000ul, PT_USER | PT_WRITABLE | PT_PRESENT);
 	if (EFI_ERROR(Status))
 		return Status;
 

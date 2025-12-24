@@ -55,8 +55,8 @@ void X86MMU::addRVMapping(uint64_t virtAddr, TranslationResult *rvMap)
 	uint64_t flags = PT_PRESENT;
 	if (rvMap->canWrite)
 		flags |= PT_WRITABLE;
-	if (!rvMap->canUser)
-		flags |= PT_SUPERVISOR;
+	if (rvMap->canUser)
+		flags |= PT_USER;
 
 	uint64_t phys = rvMap->phys_page_addr,
 	         virt = virtAddr & ~rvMap->pageoff_mask,
@@ -158,7 +158,7 @@ size_t X86MMU::doOneMapping(uintptr_t phys, uintptr_t virt, uintptr_t size, uint
 		if (!allocPhysPage(&page))
 			return 0;
 
-		*pml4e = page | PT_PRESENT | PT_WRITABLE;
+		*pml4e = page | PT_PRESENT | PT_WRITABLE | PT_USER;
 	}
 
 	pdpt = phys_to_virt<uint64_t>(*pml4e & 0x0003FFFFFFFFF000UL);
@@ -182,7 +182,7 @@ size_t X86MMU::doOneMapping(uintptr_t phys, uintptr_t virt, uintptr_t size, uint
 		if (!allocPhysPage(&page))
 			return 0;
 
-		*pdpte = page | PT_PRESENT | PT_WRITABLE;
+		*pdpte = page | PT_PRESENT | PT_WRITABLE | PT_USER;
 	}
 
 	pd = phys_to_virt<uint64_t>(*pdpte & 0x0003FFFFFFFFF000UL);
@@ -206,7 +206,7 @@ size_t X86MMU::doOneMapping(uintptr_t phys, uintptr_t virt, uintptr_t size, uint
 		if (!allocPhysPage(&page))
 			return 0;
 
-		*pde = page | PT_PRESENT | PT_WRITABLE;
+		*pde = page | PT_PRESENT | PT_WRITABLE | PT_USER;
 	}
 
 	pt = phys_to_virt<uint64_t>(*pde & 0x0003FFFFFFFFF000UL);

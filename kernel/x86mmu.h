@@ -40,7 +40,7 @@ private:
 		PT_INVALID    = 0,
 		PT_PRESENT    = 1 << 0,
 		PT_WRITABLE   = 1 << 1,
-		PT_SUPERVISOR = 1 << 2,
+		PT_USER       = 1 << 2,
 		PT_HUGEPAGE   = 1 << 7,
 		PT_NOEXEC     = 1ULL << 63,
 	} PageTableFlags;
