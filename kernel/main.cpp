@@ -34,7 +34,7 @@ void kernel_entry(KernelParams *params)
 
 	runGlobalConstructors();
 
-	setupGDT();
+	setupGDT(0);
 
 	printf("Kernel @ %lx len %lx\n", params->kernel_phys, params->kernel_len);
 	printf("Initrd @ %lx len %lx\n", params->initrd_phys, params->initrd_len);
@@ -68,7 +68,7 @@ void kernel_entry(KernelParams *params)
 		getPerCPUForOtherCPU(i)->x86mmu.init();
 
 	auto secondaryCallback = [](unsigned int cpuNum) {
-		setupGDT();
+		setupGDT(cpuNum);
 
 		// Setup per-CPU state for secondary cores. Must come after GDT setup.
 		setupPerCPUState(cpuNum);

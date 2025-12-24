@@ -30,8 +30,9 @@ void setupInterruptsPerCPU();
 enum GDTSegment {
 	SegmentKernelCS = 0x8,
 	SegmentKernelDS = 0x10,
-	SegmentUserCS = 0x18,
-	SegmentUserDS = 0x20,
+	SegmentUserCS = 0x18 | 3,
+	SegmentUserDS = 0x20 | 3,
+	SegmentTSS = 0x28,
 };
 
-void setupGDT();
+void setupGDT(unsigned int cpuNum);
