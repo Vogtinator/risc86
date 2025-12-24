@@ -360,11 +360,13 @@ void setupGDT(unsigned int cpuNum)
 	             "1:\n"
 	             :: [cs] "i" (SegmentKernelCS) : "flags", "memory", "rax");
 
-	// Reload data segment registers
+	// Reload data segment registers.
+	// User segments also work in Ring 0, so use them throughout Ring 0 and 3
+	// execution, which also leaves FSBASE intact. SS has to be DPL=0 though.
 	asm volatile("mov %[ds], %%ds\n"
 	             "mov %[ds], %%es\n"
 	             "mov %[ds], %%fs\n"
 	             "mov %[ds], %%gs\n"
-	             "mov %[ds], %%ss\n"
-	             :: [ds] "r" (SegmentKernelDS) : "memory");
+	             "mov %[ss], %%ss\n"
+	             :: [ds] "r" (SegmentUserDS), [ss] "r" (SegmentKernelDS) : "memory");
 }
