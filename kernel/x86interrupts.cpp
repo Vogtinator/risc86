@@ -1,6 +1,5 @@
 #include <stdint.h>
 #include <stdio.h>
-#include <string.h>
 
 #include "x86interrupts.h"
 #include "mem.h"
@@ -289,25 +288,21 @@ void markRVExtInterruptHandled(unsigned int rvExtIRQ)
 	//lapicWrite(0xB0, 0x00);
 }
 
-static struct {
-	uint32_t rsv0;
-	uint64_t rsp[3];
-	uint64_t rsv1;
-	uint64_t ist[7];
-	uint64_t rsv2;
-	uint16_t rsv3;
-	uint16_t iobpPtr;
-} __attribute__((packed)) tss[MAX_CPUS];
-
-static struct {
+struct GDTEntry {
 	uint16_t limit_lo;
 	uint16_t base_lo;
 	uint8_t base_mid;
 	uint8_t access;
 	uint8_t flags_limit;
 	uint8_t base_hi;
-} __attribute__((packed)) gdt[MAX_CPUS][7] = {
-    [0] = {
+} __attribute__((packed));
+
+struct GDT {
+	GDTEntry entries[7];
+};
+
+static const GDT gdtTemplate = {
+    .entries = {
         [0] = {},
         [SegmentKernelCS/8] = { .limit_lo = 0xFFFF, .access = 0b10011011, .flags_limit = 0b10101111 }, // Ring 0 CS
         [SegmentKernelDS/8] = { .limit_lo = 0xFFFF, .access = 0b10010011, .flags_limit = 0b10001111 }, // Ring 0 DS
@@ -318,11 +313,21 @@ static struct {
     },
 };
 
+static GDT gdt[MAX_CPUS];
+
+static struct {
+	uint32_t rsv0;
+	uint64_t rsp[3];
+	uint64_t rsv1;
+	uint64_t ist[7];
+	uint64_t rsv2;
+	uint16_t rsv3;
+	uint16_t iobpPtr;
+} __attribute__((packed)) tss[MAX_CPUS];
+
 void setupGDT(unsigned int cpuNum)
 {
-	// Prepare GDT for this CPU based on CPU 0
-	if (cpuNum != 0)
-		memcpy(gdt[cpuNum], gdt[0], sizeof(gdt[0]));
+	gdt[cpuNum] = gdtTemplate;
 
 	// Create the TSS for this CPU: Only needs rsp[0] set for interrupt handling.
 	// Use lowest 16KiB of the main stack for this CPU.
@@ -331,12 +336,13 @@ void setupGDT(unsigned int cpuNum)
 
 	// Set the TSS segment descriptor in the GDT
 	uintptr_t tssAddr = uintptr_t(&tss[cpuNum]);
-	gdt[cpuNum][SegmentTSS/8].base_lo = tssAddr & 0xFFFF;
-	gdt[cpuNum][SegmentTSS/8].base_mid = tssAddr >> 16;
-	gdt[cpuNum][SegmentTSS/8].base_hi = tssAddr >> 24;
-	gdt[cpuNum][SegmentTSS/8 + 1].limit_lo = tssAddr >> 32;
-	gdt[cpuNum][SegmentTSS/8 + 1].base_lo = tssAddr >> 48;
-	gdt[cpuNum][SegmentTSS/8].limit_lo = sizeof(tss[cpuNum]) - 1;
+	gdt[cpuNum].entries[SegmentTSS/8].base_lo = tssAddr;
+	gdt[cpuNum].entries[SegmentTSS/8].base_mid = tssAddr >> 16;
+	gdt[cpuNum].entries[SegmentTSS/8].base_hi = tssAddr >> 24;
+	gdt[cpuNum].entries[SegmentTSS/8 + 1].limit_lo = tssAddr >> 32;
+	gdt[cpuNum].entries[SegmentTSS/8 + 1].base_lo = tssAddr >> 48;
+	gdt[cpuNum].entries[SegmentTSS/8].access = 0b10001001;
+	gdt[cpuNum].entries[SegmentTSS/8].limit_lo = sizeof(tss[cpuNum]) - 1;
 
 	struct {
 		uint16_t limit;
