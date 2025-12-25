@@ -239,9 +239,11 @@ size_t X86MMU::doOneMapping(uintptr_t phys, uintptr_t virt, uintptr_t size, uint
 
 	uint64_t *pte = &pt[(virt >> 12) & 0x1FF];
 	if (*pte && (flags & PT_PRESENT)) {
-		// Already mapped
-		panic("Trying to map already existing page?");
-		//return EFI_INVALID_PARAMETER;
+		// Already mapped.
+		// This should not happen: If the mapping changes between accesses,
+		// an sfence.vma should happen. Maybe this isn't done when the new
+		// mapping becomes more permissible?
+		// panic("Trying to map already existing page?");
 	}
 
 	*pte = phys | flags;
