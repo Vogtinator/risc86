@@ -86,6 +86,35 @@ static void irqHandler(InterruptFrame *frame, int irq)
 	}
 }
 
+__attribute__((naked))
+static void switchRing0Handler()
+{
+	// When returning with iretq, the CPU only switches stacks if there's
+	// a difference in rings, but this returns from Ring 0 to Ring 0,
+	// so the stack has to be switched manually.
+	// Instead of using iretq, just return normally by making a stack frame
+	// on the caller's stack (!) and switching to it.
+	asm(R"asm(
+	    mov %rax, -0x08(%rsp) # Save RAX and RBX for later
+	    mov %rbx, -0x10(%rsp)
+	    movw $0x10, %ax # Reload KernelSegmentDS into %ss
+	    mov %ax, %ss
+	    mov 0x18(%rsp), %rbx # Load the previous RSP
+	    sub $0x18, %rbx
+	    mov -0x10(%rsp), %rax # Get the the old value of RBX
+	    mov %rax, 0x00(%rbx) # And put it onto the caller's stack
+	    mov 0x10(%rsp), %rax # Load the previous RFLAGS
+	    mov %rax, 0x08(%rbx) # Write RFLAGS to it
+	    mov 0(%rsp), %rax # Load the previous RIP
+	    mov %rax, 0x10(%rbx) # Write RIP to it
+	    mov -0x08(%rsp), %rax # Restore RAX
+	    mov %rbx, %rsp # Switch stacks
+	    pop %rbx
+	    popfq
+	    ret
+	)asm");
+}
+
 // x86 calls a different handler for each interrupt vector,
 // with no (generic) way to get the number dynamically.
 // This is a template to generate wrappers for each IRQ that
@@ -105,9 +134,9 @@ static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 
 	uint64_t sign = int64_t(addr) >> 39;
 	if ((sign != 0 && ~sign != 0) || (errorCode & ~0b111))
-		panic("Unexpected page fault for address %lx at %lx", addr, frame->ip);
+		panic("Unexpected page fault (code 0x%lx) for address %lx at %lx", errorCode, addr, frame->ip);
 
-	bool pagePresent = errorCode & 0b001, isWrite = errorCode & 0b010;
+	bool pagePresent = errorCode & 0b001, isWrite = errorCode & 0b010, isUser = errorCode & 0b100;
 
 	auto *hart = &getPerCPU()->hart;
 	auto translationResult = mmu_translate(hart, addr, isWrite ? AccessType::Write : AccessType::Read);
@@ -158,6 +187,12 @@ static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 	return;
 }
 
+__attribute__((interrupt)) __attribute__((target("general-regs-only")))
+static void gpFaultHandler(InterruptFrame *frame, uint64_t errorCode)
+{
+	panic("General Protection Fault at %lx, code %lx", frame->ip, errorCode);
+}
+
 __attribute__((interrupt))
 static void doubleFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 {
@@ -192,6 +227,7 @@ struct IDTEntry {
 
 static const IDTEntry idt[] = {
     [0x08] = IDTEntry{doubleFaultHandler},
+    [0x0d] = IDTEntry{gpFaultHandler},
     [0x0e] = IDTEntry{pageFaultHandler},
 #define IRQ_HANDLER(n) [n] = IDTEntry{irqHandler<n>}
 #define IRQ_HANDLERS_2(n) IRQ_HANDLER(n), IRQ_HANDLER(n+1)
@@ -202,7 +238,7 @@ static const IDTEntry idt[] = {
 #define IRQ_HANDLERS_64(n) IRQ_HANDLERS_32(n), IRQ_HANDLERS_32(n+32)
     IRQ_HANDLERS_32(0x20),
     IRQ_HANDLERS_64(0x40),
-    IRQ_HANDLERS_64(0x80),
+    [X86_IRQ_RING_0] = IDTEntry{switchRing0Handler},
     IRQ_HANDLERS_64(0xC0),
 };
 

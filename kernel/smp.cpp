@@ -239,7 +239,8 @@ void SMP::setupSMP(PhysAddr trampolinePage, void (secondaryCallback)(unsigned in
 	relocAdd(trampoline + uintptr_t(smp_trampoline_reloc_gdtp) - uintptr_t(smp_trampoline));
 
 	// The BSP is CPU 0
-	cpusReallyOnline = cpusOnline = 1;
+	cpusOnline = 1;
+	cpusReallyOnline = 1;
 	cpuNumToLAPICID[0] = getLAPICID();
 
 	for (int i = 0; i < cpusFound; ++i) {

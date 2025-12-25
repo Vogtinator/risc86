@@ -227,18 +227,6 @@ bool Hart::virtRead(uint64_t addr, T *valuePtr)
 		return false;
 	}
 
-	if (this->mode == Hart::MODE_USER) {
-		auto res = mmu_translate(this, addr, AccessType::Read);
-		if (!res.pageoff_mask) {
-			handleInterrupt(Hart::SCAUSE_LOAD_PAGE_FAULT, addr);
-			return false;
-		}
-
-		PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
-		*valuePtr = *phys_to_virt<T>(phys);
-		return true;
-	}
-
 	T value;
 	bool fault;
 	asm volatile("clc\n" // Clear carry flag
@@ -269,18 +257,6 @@ bool Hart::virtWrite(uint64_t addr, T value)
 			handleInterrupt(Hart::SCAUSE_STORE_MISALIGN, addr);
 			return false;
 		}
-	}
-
-	if (this->mode == MODE_USER) {
-		auto res = mmu_translate(this, addr, AccessType::Write);
-		if (!res.pageoff_mask) {
-			handleInterrupt(Hart::SCAUSE_STORE_PAGE_FAULT, addr);
-			return false;
-		}
-
-		PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
-		*phys_to_virt<T>(phys) = value;
-		return true;
 	}
 
 	bool fault;

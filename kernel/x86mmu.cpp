@@ -95,10 +95,34 @@ void X86MMU::flushRVMappingAtomic(uintptr_t addr, size_t size)
 	asm volatile("sti");
 }
 
+// Separate function to ensure the redzone isn't used
+ __attribute__((noinline))
+static void switchToRing0() {
+	// Syscall to return to ring 0
+	asm volatile("int %[irq]" :: [irq] "i" (uint8_t(X86_IRQ_RING_0)));
+}
+
 void X86MMU::switchPrivileges(Priv priv)
 {
-	if (priv != Priv::Supervisor)
-		panic("TODO");
+	if (priv == Priv::Supervisor) {
+		switchToRing0();
+		return;
+	}
+
+	// Use iretq to "return" to ring 3.
+	// Only CS and SS need to be switched, everything else is already DPL=3.
+	asm volatile("mov %%rsp, %%rax\n"
+	             "push %[ds]\n"
+	             "push %%rax\n"
+	             "pushfq\n"
+	             "orq $(3 << 12), 0(%%rsp)\n" // Set IOPL in EFLAGS so that port IO keeps working
+	             "push %[cs]\n"
+	             "leaq 1f(%%rip), %%rax\n"
+	             "pushq %%rax\n"
+	             "iretq\n"
+	             "1:\n"
+	             :: [cs] "i" (SegmentUserCS), [ds] "i" (SegmentUserDS)
+	             : "flags", "memory", "rax");
 }
 
 bool X86MMU::allocPhysPage(PhysAddr *addr)
