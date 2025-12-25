@@ -299,7 +299,10 @@ size_t X86MMU::doOneMapping(uintptr_t phys, uintptr_t virt, uintptr_t size, uint
 	uint64_t *pd;
 	if ((*pdpte & PT_PRESENT) && !(*pdpte & PT_HUGEPAGE)) {
 		// Follow the existing table
-	} else if (!(*pdpte & PT_PRESENT) && !(flags & PT_PRESENT)) {
+	} else if (!(flags & PT_PRESENT)) {
+		if (*pdpte & PT_PRESENT)
+			*pdpte = 0;
+
 		// Don't bother to make a page directory just for non-present entries.
 		return 1 << 30;
 	} else {
@@ -323,7 +326,10 @@ size_t X86MMU::doOneMapping(uintptr_t phys, uintptr_t virt, uintptr_t size, uint
 	uint64_t *pt;
 	if ((*pde & PT_PRESENT) && !(*pde & PT_HUGEPAGE)) {
 		// Follow the existing table
-	} else if (!(*pde & PT_PRESENT) && !(flags & PT_PRESENT)) {
+	} else if (!(flags & PT_PRESENT)) {
+		if (*pde & PT_PRESENT)
+			*pde = 0;
+
 		// Don't bother to make a page directory just for non-present entries.
 		return 1 << 21;
 	} else {
