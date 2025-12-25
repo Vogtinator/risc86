@@ -78,7 +78,9 @@ void X86MMU::addRVMapping(uint64_t virtAddr, TranslationResult *rvMap)
 void X86MMU::flushRVMapping(uintptr_t addr, size_t size)
 {
 	while (size > 0) {
-		auto flushedSize = doOneMapping(0, addr, size, PT_INVALID);
+		// Pass UINT64_MAX as size to flush whatever mapping is at addr,
+		// also if size is 4k and the mapping at addr is a 1GiB huge page.
+		auto flushedSize = doOneMapping(0, addr, UINT64_MAX & ~0xFFFul, PT_INVALID);
 		asm volatile("invlpg (%[addr])" :: [addr] "r" (addr));
 		if (flushedSize >= size)
 			break;
