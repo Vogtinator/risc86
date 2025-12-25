@@ -4,9 +4,27 @@
 
 // general-regs-only shouldn't be necessary, but there's some issue
 // with a misaligned stack which causes movaps to fault.
+#define X86_IRQ_HANDLER __attribute__((interrupt)) __attribute__((target("general-regs-only")))
 #define CALLED_FROM_IRQ __attribute__((no_caller_saved_registers)) __attribute__((target("general-regs-only")))
 
+// Frame as pushed by the CPU and passed to
+// functions with __attribute__((interrupt)).
+// Members have to be volatile, otherwise writes
+// get optimized away.
+struct InterruptFrame
+{
+	volatile uint64_t ip;
+	volatile uint64_t cs;
+	volatile uint64_t flags;
+	volatile uint64_t sp;
+	volatile uint64_t ss;
+};
+
 enum x86IRQ {
+	// x86 CPU internal vectors
+	X86_IRQ_DOUBLE_FAULT = 8,
+	X86_IRQ_GP_FAULT = 13,
+	X86_IRQ_PAGE_FAULT = 14,
 	// Mapped 1:1 to RV external interrupts
 	X86_IRQ_RV_FIRST = 32,
 	X86_IRQ_RV_LAST = 95,
@@ -28,6 +46,8 @@ void markRVIPIHandled();
 void setupInterrupts();
 void setupInterruptsPerCPU();
 
+void installIRQHandler(uint8_t irq, void *handler);
+
 // Segments defined by the GDT
 enum GDTSegment {
 	SegmentKernelCS = 0x8,
@@ -37,4 +57,5 @@ enum GDTSegment {
 	SegmentTSS = 0x28,
 };
 
+// Set up GDT and TSS
 void setupGDT(unsigned int cpuNum);

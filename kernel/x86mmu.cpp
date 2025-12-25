@@ -2,7 +2,105 @@
 #include <string.h>
 
 #include "x86mmu.h"
+#include "percpu.h"
 #include "utils.h"
+
+X86_IRQ_HANDLER
+static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
+{
+	// Get the fault address from CR2
+	uint64_t addr;
+	asm("mov %%cr2, %[addr]" : [addr] "=r" (addr));
+
+	uint64_t sign = int64_t(addr) >> 39;
+	if ((sign != 0 && ~sign != 0) || (errorCode & ~0b111))
+		panic("Unexpected page fault (code 0x%lx) for address %lx at %lx", errorCode, addr, frame->ip);
+
+	bool pagePresent = errorCode & 0b001, isWrite = errorCode & 0b010, isUser = errorCode & 0b100;
+
+	auto *hart = &getPerCPU()->hart;
+	auto translationResult = mmu_translate(hart, addr, isWrite ? AccessType::Write : AccessType::Read);
+
+	bool isFault = false;
+
+	if (translationResult.pageoff_mask) {
+		getPerCPU()->x86mmu.addRVMapping(addr, &translationResult);
+	} else {
+		isFault = true;
+	}
+
+	// Set the Carry flag on fault and advance, clear it otherwise
+	if (isFault) {
+		// Find which instruction caused the fault to get its length.
+		// Proper decoding not needed here, the set of possible instructions
+		// is known.
+		const uint64_t faultInsn = *(uint64_t*)(frame->ip);
+		unsigned int faultInsnLen;
+		if ((faultInsn & 0xFFFFFF) == 0x028b48) // mov (%rdx), %rax
+			faultInsnLen = 3;
+		else if ((faultInsn & 0xFFFF) == 0x028b) // mov (%rdx), %eax
+			faultInsnLen = 2;
+		else if ((faultInsn & 0xFFFFFF) == 0x028b66) // mov (%rdx), %ax
+			faultInsnLen = 3;
+		else if ((faultInsn & 0xFFFF) == 0x028a) // mov (%rdx), %al
+			faultInsnLen = 2;
+		else if ((faultInsn & 0xFFFFFF) == 0x028948) // mov %rax, (%rdx)
+			faultInsnLen = 3;
+		else if ((faultInsn & 0xFFFF) == 0x0289) // mov %eax, (%rdx)
+			faultInsnLen = 2;
+		else if ((faultInsn & 0xFFFFFF) == 0x028966) // mov %ax, (%rdx)
+			faultInsnLen = 3;
+		else if ((faultInsn & 0xFFFF) == 0x0288) // mov %al, (%rdx)
+			faultInsnLen = 2;
+		else
+			panic("Unexpected instruction in fault handler: %lx at %lx", faultInsn, frame->ip);
+
+		// Skip the faulting instruction and set the
+		frame->ip += faultInsnLen;
+		frame->flags |= 1ul << 0;
+	} else {
+		// Retry the instruction.
+		// Carry should be clear already.
+		// frame->flags &= ~(1ul << 0);
+	}
+
+	return;
+}
+
+__attribute__((naked))
+static void switchRing0Handler()
+{
+	// When returning with iretq, the CPU only switches stacks if there's
+	// a difference in rings, but this returns from Ring 0 to Ring 0,
+	// so the stack has to be switched manually.
+	// Instead of using iretq, just return normally by making a stack frame
+	// on the caller's stack (!) and switching to it.
+	asm(R"asm(
+	    mov %rax, -0x08(%rsp) # Save RAX and RBX for later
+	    mov %rbx, -0x10(%rsp)
+	    movw $0x10, %ax # Reload KernelSegmentDS into %ss
+	    mov %ax, %ss
+	    mov 0x18(%rsp), %rbx # Load the previous RSP
+	    sub $0x18, %rbx
+	    mov -0x10(%rsp), %rax # Get the the old value of RBX
+	    mov %rax, 0x00(%rbx) # And put it onto the caller's stack
+	    mov 0x10(%rsp), %rax # Load the previous RFLAGS
+	    mov %rax, 0x08(%rbx) # Write RFLAGS to it
+	    mov 0(%rsp), %rax # Load the previous RIP
+	    mov %rax, 0x10(%rbx) # Write RIP to it
+	    mov -0x08(%rsp), %rax # Restore RAX
+	    mov %rbx, %rsp # Switch stacks
+	    pop %rbx
+	    popfq
+	    ret
+	)asm");
+}
+
+void X86MMU::initGlobal()
+{
+	installIRQHandler(X86_IRQ_PAGE_FAULT, (void*) pageFaultHandler);
+	installIRQHandler(X86_IRQ_RING_0, (void*) switchRing0Handler);
+}
 
 void X86MMU::init()
 {

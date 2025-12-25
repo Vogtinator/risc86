@@ -1,5 +1,6 @@
 #include "hpet.h"
 #include "mem.h"
+#include "percpu.h"
 #include "stdio.h"
 #include "uacpi/acpi.h"
 #include "uacpi/tables.h"
@@ -99,6 +100,15 @@ static void calibrateLAPIC()
 	printf("1000 HPET ticks map to %lu LAPIC ticks\n", hpetTicksToLAPICTicks(1000));
 }
 
+X86_IRQ_HANDLER
+static void lapicIRQHandler(InterruptFrame *frame)
+{
+	(void) frame;
+	auto *hart = &getPerCPU()->hart;
+	hart->sip |= SIP_STIP;
+	lapicWrite(0xB0, 0x00);
+}
+
 void setupHPET()
 {
 	uacpi_table tbl;
@@ -118,6 +128,8 @@ void setupHPET()
 	hpetWrite(HPET_REG_CONF, conf);
 
 	calibrateLAPIC();
+
+	installIRQHandler(X86_IRQ_LAPIC_TIMER, (void*) lapicIRQHandler);
 }
 
 void setupLAPICTimer()

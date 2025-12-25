@@ -8,6 +8,8 @@
 
 class X86MMU {
 public:
+	// Install IRQ handlers.
+	static void initGlobal();
 	// Allocate structures and initialize current mapping.
 	void init();
 	// Remove all (non-global) guest mappings and switch to the new set.

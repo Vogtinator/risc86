@@ -27,6 +27,43 @@ enum {
 	SBI_EXT_PMU  = 0x504D55,
 };
 
+X86_IRQ_HANDLER
+static void internalIPIHandler(InterruptFrame *frame)
+{
+	(void) frame;
+	auto *hart = &getPerCPU()->hart;
+
+	if (hart->state == Hart::State::START_PENDING)
+		hart->state = Hart::State::STARTED;
+	else if (hart->rfence_state == Hart::RFenceState::Requested) {
+		if (hart->rfence_size == ~0ul || (hart->rfence_addr == 0 && hart->rfence_size == 0))
+			getPerCPU()->x86mmu.resetContext();
+		else
+			getPerCPU()->x86mmu.flushRVMapping(hart->rfence_addr, hart->rfence_size);
+
+		hart->rfence_state = Hart::RFenceState::Completed;
+	} else
+		panic("IPI for unknown cause\n");
+
+	lapicWrite(0xB0, 0x00);
+}
+
+X86_IRQ_HANDLER
+static void rvIPIHandler(InterruptFrame *frame)
+{
+	(void) frame;
+	auto *hart = &getPerCPU()->hart;
+	hart->sip |= SIP_SSIP;
+	// TODO: Like for external IRQs, EOI should only be sent in markRVIPIHandled().
+	lapicWrite(0xB0, 0x00);
+}
+
+void setupSBI()
+{
+	installIRQHandler(X86_IRQ_INTERNAL_IPI, (void*) internalIPIHandler);
+	installIRQHandler(X86_IRQ_RV_IPI, (void*) rvIPIHandler);
+}
+
 static uint64_t sbiCall(Hart *hart, uint64_t *result)
 {
 	uint64_t ext = hart->regs[17], func = hart->regs[16];

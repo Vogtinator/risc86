@@ -11,6 +11,7 @@
 #include "mem.h"
 #include "pci.h"
 #include "percpu.h"
+#include "sbi.h"
 #include "smp.h"
 #include "utils.h"
 #include "x86interrupts.h"
@@ -62,6 +63,8 @@ void kernel_entry(KernelParams *params)
 
 	setupInterrupts();
 
+	X86MMU::initGlobal();
+
 	setupHPET();
 
 	for (unsigned int i = 0; i < MAX_CPUS; ++i)
@@ -93,6 +96,8 @@ void kernel_entry(KernelParams *params)
 	SMP::setupSMP(trampolinePage, secondaryCallback);
 
 	setupLAPICTimer();
+
+	setupSBI();
 
 	getPerCPU()->x86mmu.resetContext();
 

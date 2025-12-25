@@ -5,8 +5,8 @@
 #include "hpet.h"
 #include "loaderapi.h"
 #include "pci.h"
-#include "percpu.h"
 #include "smp.h"
+#include "utils.h"
 
 PhysAddr buildDeviceTreeBlob()
 {

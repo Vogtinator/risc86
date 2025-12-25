@@ -4,23 +4,9 @@
 #include "x86interrupts.h"
 #include "mem.h"
 #include "percpu.h"
-#include "rvmmu.h"
 #include "uacpi/acpi.h"
 #include "uacpi/tables.h"
 #include "utils.h"
-
-// Frame as pushed by the CPU and passed to
-// functions with __attribute__((interrupt)).
-// Members have to be volatile, otherwise writes
-// get optimized away.
-struct InterruptFrame
-{
-	volatile uint64_t ip;
-	volatile uint64_t cs;
-	volatile uint64_t flags;
-	volatile uint64_t sp;
-	volatile uint64_t ss;
-};
 
 // x86 can't use vectors 0-31 for external interrupts,
 // so shift RISC-V interrupts by 32.
@@ -47,10 +33,7 @@ static void irqHandler(InterruptFrame *frame, int irq)
 {
 	auto *hart = &getPerCPU()->hart;
 
-	if (irq == X86_IRQ_LAPIC_TIMER) {
-		hart->sip |= SIP_STIP;
-		lapicWrite(0xB0, 0x00);
-	} else if (irq >= X86_IRQ_RV_FIRST && irq <= X86_IRQ_RV_LAST) {
+	if (irq >= X86_IRQ_RV_FIRST && irq <= X86_IRQ_RV_LAST) {
 		static_assert(X86_IRQ_RV_LAST / 64 < sizeof(Hart::eip_64)/sizeof(Hart::eip_64[0]));
 		auto rvExtIRQ = x86IRQtoRVExtIRQ(irq);
 		if (rvExtIRQ / 64 >= sizeof(Hart::eip_64)/sizeof(Hart::eip_64[0]))
@@ -61,24 +44,6 @@ static void irqHandler(InterruptFrame *frame, int irq)
 		// but interrupts are enabled so by then another higher prio IRQ might've taken over
 		// and the EOI acks the wrong one.
 		lapicWrite(0xB0, 0x00);
-	} else if (irq == X86_IRQ_RV_IPI) {
-		hart->sip |= SIP_SSIP;
-		// TODO: Like above, EOI should only be sent in markRVIPIHandled().
-		lapicWrite(0xB0, 0x00);
-	} else if (irq == X86_IRQ_INTERNAL_IPI) {
-		if (hart->state == Hart::State::START_PENDING)
-			hart->state = Hart::State::STARTED;
-		else if (hart->rfence_state == Hart::RFenceState::Requested) {
-			if (hart->rfence_size == ~0ul || (hart->rfence_addr == 0 && hart->rfence_size == 0))
-				getPerCPU()->x86mmu.resetContext();
-			else
-				getPerCPU()->x86mmu.flushRVMapping(hart->rfence_addr, hart->rfence_size);
-
-			hart->rfence_state = Hart::RFenceState::Completed;
-		} else
-			panic("IPI for unknown cause\n");
-
-		lapicWrite(0xB0, 0x00);
 	} else if (irq == X86_IRQ_SPURIOUS) {
 		return;
 	} else {
@@ -86,114 +51,23 @@ static void irqHandler(InterruptFrame *frame, int irq)
 	}
 }
 
-__attribute__((naked))
-static void switchRing0Handler()
-{
-	// When returning with iretq, the CPU only switches stacks if there's
-	// a difference in rings, but this returns from Ring 0 to Ring 0,
-	// so the stack has to be switched manually.
-	// Instead of using iretq, just return normally by making a stack frame
-	// on the caller's stack (!) and switching to it.
-	asm(R"asm(
-	    mov %rax, -0x08(%rsp) # Save RAX and RBX for later
-	    mov %rbx, -0x10(%rsp)
-	    movw $0x10, %ax # Reload KernelSegmentDS into %ss
-	    mov %ax, %ss
-	    mov 0x18(%rsp), %rbx # Load the previous RSP
-	    sub $0x18, %rbx
-	    mov -0x10(%rsp), %rax # Get the the old value of RBX
-	    mov %rax, 0x00(%rbx) # And put it onto the caller's stack
-	    mov 0x10(%rsp), %rax # Load the previous RFLAGS
-	    mov %rax, 0x08(%rbx) # Write RFLAGS to it
-	    mov 0(%rsp), %rax # Load the previous RIP
-	    mov %rax, 0x10(%rbx) # Write RIP to it
-	    mov -0x08(%rsp), %rax # Restore RAX
-	    mov %rbx, %rsp # Switch stacks
-	    pop %rbx
-	    popfq
-	    ret
-	)asm");
-}
-
 // x86 calls a different handler for each interrupt vector,
 // with no (generic) way to get the number dynamically.
 // This is a template to generate wrappers for each IRQ that
 // dispatch to a common handler function.
-template <int irq> __attribute__((interrupt))
+template <int irq> X86_IRQ_HANDLER
 static void irqHandler(InterruptFrame *frame)
 {
 	return irqHandler(frame, irq);
 }
 
-__attribute__((interrupt)) __attribute__((target("general-regs-only")))
-static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
-{
-	// Get the fault address from CR2
-	uint64_t addr;
-	asm("mov %%cr2, %[addr]" : [addr] "=r" (addr));
-
-	uint64_t sign = int64_t(addr) >> 39;
-	if ((sign != 0 && ~sign != 0) || (errorCode & ~0b111))
-		panic("Unexpected page fault (code 0x%lx) for address %lx at %lx", errorCode, addr, frame->ip);
-
-	bool pagePresent = errorCode & 0b001, isWrite = errorCode & 0b010, isUser = errorCode & 0b100;
-
-	auto *hart = &getPerCPU()->hart;
-	auto translationResult = mmu_translate(hart, addr, isWrite ? AccessType::Write : AccessType::Read);
-
-	bool isFault = false;
-
-	if (translationResult.pageoff_mask) {
-		getPerCPU()->x86mmu.addRVMapping(addr, &translationResult);
-	} else {
-		isFault = true;
-	}
-
-	// Set the Carry flag on fault and advance, clear it otherwise
-	if (isFault) {
-		// Find which instruction caused the fault to get its length.
-		// Proper decoding not needed here, the set of possible instructions
-		// is known.
-		const uint64_t faultInsn = *(uint64_t*)(frame->ip);
-		unsigned int faultInsnLen;
-		if ((faultInsn & 0xFFFFFF) == 0x028b48) // mov (%rdx), %rax
-			faultInsnLen = 3;
-		else if ((faultInsn & 0xFFFF) == 0x028b) // mov (%rdx), %eax
-			faultInsnLen = 2;
-		else if ((faultInsn & 0xFFFFFF) == 0x028b66) // mov (%rdx), %ax
-			faultInsnLen = 3;
-		else if ((faultInsn & 0xFFFF) == 0x028a) // mov (%rdx), %al
-			faultInsnLen = 2;
-		else if ((faultInsn & 0xFFFFFF) == 0x028948) // mov %rax, (%rdx)
-			faultInsnLen = 3;
-		else if ((faultInsn & 0xFFFF) == 0x0289) // mov %eax, (%rdx)
-			faultInsnLen = 2;
-		else if ((faultInsn & 0xFFFFFF) == 0x028966) // mov %ax, (%rdx)
-			faultInsnLen = 3;
-		else if ((faultInsn & 0xFFFF) == 0x0288) // mov %al, (%rdx)
-			faultInsnLen = 2;
-		else
-			panic("Unexpected instruction in fault handler: %lx at %lx", faultInsn, frame->ip);
-
-		// Skip the faulting instruction and set the
-		frame->ip += faultInsnLen;
-		frame->flags |= 1ul << 0;
-	} else {
-		// Retry the instruction.
-		// Carry should be clear already.
-		// frame->flags &= ~(1ul << 0);
-	}
-
-	return;
-}
-
-__attribute__((interrupt)) __attribute__((target("general-regs-only")))
+X86_IRQ_HANDLER
 static void gpFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 {
 	panic("General Protection Fault at %lx, code %lx", frame->ip, errorCode);
 }
 
-__attribute__((interrupt))
+X86_IRQ_HANDLER
 static void doubleFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 {
 	(void) errorCode;
@@ -225,10 +99,9 @@ struct IDTEntry {
 	IDTEntry() {}
 } __attribute__ ((packed));
 
-static const IDTEntry idt[] = {
-    [0x08] = IDTEntry{doubleFaultHandler},
-    [0x0d] = IDTEntry{gpFaultHandler},
-    [0x0e] = IDTEntry{pageFaultHandler},
+static IDTEntry idt[] = {
+    [X86_IRQ_DOUBLE_FAULT] = IDTEntry{doubleFaultHandler},
+    [X86_IRQ_GP_FAULT] = IDTEntry{gpFaultHandler},
 #define IRQ_HANDLER(n) [n] = IDTEntry{irqHandler<n>}
 #define IRQ_HANDLERS_2(n) IRQ_HANDLER(n), IRQ_HANDLER(n+1)
 #define IRQ_HANDLERS_4(n) IRQ_HANDLERS_2(n), IRQ_HANDLERS_2(n+2)
@@ -238,8 +111,7 @@ static const IDTEntry idt[] = {
 #define IRQ_HANDLERS_64(n) IRQ_HANDLERS_32(n), IRQ_HANDLERS_32(n+32)
     IRQ_HANDLERS_32(0x20),
     IRQ_HANDLERS_64(0x40),
-    [X86_IRQ_RING_0] = IDTEntry{switchRing0Handler},
-    IRQ_HANDLERS_64(0xC0),
+    IRQ_HANDLER(X86_IRQ_SPURIOUS),
 };
 
 static PhysAddr lapicPhys = 0;
@@ -306,6 +178,14 @@ void setupInterruptsPerCPU()
 	lapicWrite(0xF0, 0x1FF);
 
 	asm volatile("sti");
+}
+
+void installIRQHandler(uint8_t irq, void *handler)
+{
+	if (idt[irq].flags)
+		panic("Tried to install handler for already occupied IRQ %d", irq);
+
+	idt[irq] = IDTEntry(handler);
 }
 
 void markRVIPIHandled()
