@@ -27,6 +27,7 @@ static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 		getPerCPU()->x86mmu.addRVMapping(addr, &translationResult);
 	} else {
 		isFault = true;
+		hart->stval = addr;
 	}
 
 	// Set the Carry flag on fault and advance, clear it otherwise
@@ -55,7 +56,7 @@ static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 		else
 			panic("Unexpected instruction in fault handler: %lx at %lx", faultInsn, frame->ip);
 
-		// Skip the faulting instruction and set the
+		// Skip the faulting instruction and set the carry flag
 		frame->ip += faultInsnLen;
 		frame->flags |= 1ul << 0;
 	} else {

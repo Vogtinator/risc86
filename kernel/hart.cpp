@@ -221,12 +221,6 @@ bool Hart::fetchInstruction(uint16_t *inst, uint64_t addr)
 template <typename T> __attribute__((warn_unused_result))
 bool Hart::virtRead(uint64_t addr, T *valuePtr)
 {
-	if (addr & (sizeof(T) - 1)) {
-		printf("Unaligned read\n");
-		handleInterrupt(Hart::SCAUSE_LOAD_MISALIGN, addr);
-		return false;
-	}
-
 	T value;
 	bool fault;
 	asm volatile("clc\n" // Clear carry flag
@@ -236,7 +230,9 @@ bool Hart::virtRead(uint64_t addr, T *valuePtr)
 	             : [addr] "d" (addr) : "flags");
 
 	if (fault) {
-		handleInterrupt(Hart::SCAUSE_LOAD_PAGE_FAULT, addr);
+		// The page fault handler sets stval for us.
+		// In the case of unaligned access, this is not necessarily == addr!
+		handleInterrupt(Hart::SCAUSE_LOAD_PAGE_FAULT, this->stval);
 		return false;
 	}
 
@@ -247,18 +243,6 @@ bool Hart::virtRead(uint64_t addr, T *valuePtr)
 template <typename T> __attribute__((warn_unused_result))
 bool Hart::virtWrite(uint64_t addr, T value)
 {
-	if (addr & (sizeof(T) - 1)) {
-		if (!this->satp) {
-			// The kernel has unaligned relocs and writes to them
-			// directly with misaligned writes. Faulting here
-			// results in an endless loop.
-		} else {
-			printf("Unaligned write\n");
-			handleInterrupt(Hart::SCAUSE_STORE_MISALIGN, addr);
-			return false;
-		}
-	}
-
 	bool fault;
 	asm volatile("clc\n" // Clear carry flag
 	             "mov %[value], (%[addr])\n" // Perform move
@@ -267,7 +251,9 @@ bool Hart::virtWrite(uint64_t addr, T value)
 	             : [value] "a" (value), [addr] "d" (addr) : "flags", "memory");
 
 	if (fault) {
-		handleInterrupt(Hart::SCAUSE_STORE_PAGE_FAULT, addr);
+		// The page fault handler sets stval for us.
+		// In the case of unaligned access, this is not necessarily == addr!
+		handleInterrupt(Hart::SCAUSE_STORE_PAGE_FAULT, this->stval);
 		return false;
 	}
 
@@ -307,14 +293,15 @@ void Hart::dump()
 	struct { uint64_t *ptr; const char *name; } csrs[] = {
 #define REG(x) { &this->x, # x }
 		REG(sstatus), REG(stvec), REG(sie), REG(sscratch),
-		REG(sepc), REG(scause), REG(stval), REG(satp), REG(stimecmp)
+		REG(sepc), REG(scause), REG(satp), REG(stimecmp)
 #undef REG
 	};
 
 	for (auto csr : csrs)
 		printf("%8s: %016lx\n", csr.name, *csr.ptr);
 
-	printf("sip: %08x\n", this->scounteren);
+	printf("sip: %08lx\n", this->sip);
+	printf("stval: %08lx\n", this->stval);
 	printf("scounteren: %08x\n", this->scounteren);
 }
 

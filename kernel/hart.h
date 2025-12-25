@@ -56,7 +56,7 @@ struct Hart {
 	uint64_t sscratch;
 	uint64_t sepc;
 	uint64_t scause;
-	uint64_t stval;
+	volatile uint64_t stval; // Written by this CPU's page fault handler
 	uint64_t satp;
 	uint64_t stimecmp;
 
