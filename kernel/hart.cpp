@@ -1704,6 +1704,8 @@ void Hart::runInstruction(uint32_t inst)
 					return;
 				}
 			} else if (inst == 0x00100073u) { // ebreak
+				// TODO: Check surrounding instructions to properly separate debug ebreaks
+				// from semihosting calls.
 				if (this->regs[10] == 3) { // semihosting putc
 					uint8_t ch;
 					if (virtRead(getReg(11), &ch))
@@ -1712,7 +1714,7 @@ void Hart::runInstruction(uint32_t inst)
 						panic("Fault during semihost putc");
 					break;
 				}
-				panic("ebreak");
+				this->handleInterrupt(Hart::SCAUSE_EBREAK, 0);
 			} else if ((inst & 0b1111111'00000'00000'111'11111'1111111) == 0b0001001'00000'00000'000'00000'1110011) { // sfence.vma
 				uint32_t rs1 = (inst >> 15) & 31;
 				uint32_t rs2 = (inst >> 20) & 31;
