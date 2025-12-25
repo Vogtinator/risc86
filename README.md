@@ -8,7 +8,7 @@ RISC86 is an EFI executable that provides an environment for running RISC-V oper
 State
 --
 
-As of now, it can boot mainline kernels and run generic userspace, but it's quite slow as acceleration using the x86 MMU and JITing of code is not implemented yet.
+As of now, it can boot mainline kernels and run generic userspace, but it's quite slow as acceleration by JIT translating RISC-V code to x86 instructions is not implemented yet.
 
 There's no remapping of RISC-V external interrupts ATM, so for PCI support, a kernel patch is required to avoid IRQs reserved by x86:
 
@@ -111,6 +111,18 @@ The native x86 code has 48 virtual address bits, allowing for wider ranges:
 ```
 
 The emulator uses the 0xFFFF800000000000 - 0xFFFFFFBFFFFFFFFF range for virtual addresses, which is valid for x86 but non-canonical for RISC-V.
+
+In that range, some memory is mapped for the kernel itself, stacks for each host CPU core and a direct mapping of physical memory such that it remains accessible to the emulator at all times. See [kernel/loaderapi.h](kernel/loaderapi.h) for details.
+
+### MMU
+
+There are two ways memory access (read, write, instruction fetch) is implemented:
+
+One is completely software emulated by performing Sv39 MMU translation to get a physical address (generating a RISC-V fault if necessary), then using the direct physical memory mapping to perform the access.
+
+The other one uses the x86 MMU to handle those accesses directly (except for amo* and lr/sc instructions): For each access, the x86 carry flag is cleared, then the guest virtual address accessed directly as host virtual address. If this does not generate a fault, the carry flag remains clear and execution continues normally. If it generates a fault because there is no host mapping for the guest address, a page fault is generated on the host. The page fault handler invokes Sv39 MMU translation and sets up a mapping for it in the x86 page tables if successful. If the Sv39 translation results in a fault (not mapped, permission error), the carry bit is set and the fault handler skips the memory access instruction. The emulation code reacts by raising  RISC-V fault. On writes to SATP, when using SFENCE.VMA or SBI RFENCE, the x86 mappings for affected virtual memory ranges are removed. Essentially the x86 MMU page tables act like a TLB.
+
+Differentiating between User and Supervisor mode access to memory is achieved by switching the emulator between Ring 0 and Ring 3 when the RISC-V code switches between modes: For Ring 0 -> Ring 3 it uses `iretq`, while for Ring 3 -> Ring 0 it has to perform a syscall using `int 0x80`, where the handler returns to the caller with Ring 0 privileges.
 
 ### Timer
 
