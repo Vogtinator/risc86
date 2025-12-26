@@ -135,6 +135,33 @@ bool Hart::virtWritePtr(uint64_t addr, T **ptr)
 	return true;
 }
 
+// Perform MMU lookup of a translation, fault if neccessary.
+__attribute__((warn_unused_result))
+bool Hart::fetchInstructionPhys(PhysAddr *physRes, uint64_t addr)
+{
+	if (addr & (sizeof(uint16_t) - 1))
+		panic("Unaligned instruction fetch");
+
+	// Hacky iTLB: Remember the last translated page
+	if (itlb.last_satp == this->satp && itlb.last_virt == (addr & ~0xFFFul)) {
+		*physRes = itlb.last_phys + (addr & 0xFFFul);
+		return true;
+	}
+
+	auto res = mmu_translate(this, addr, AccessType::Exec);
+	if (!res.pageoff_mask) {
+		handleInterrupt(Hart::SCAUSE_INSTR_PAGE_FAULT, addr);
+		return false;
+	}
+
+	PhysAddr phys = res.phys_page_addr + (addr & res.pageoff_mask);
+	itlb.last_virt = addr & ~0xFFFul;
+	itlb.last_phys = phys & ~0xFFFul;
+	itlb.last_satp = this->satp;
+	*physRes = phys;
+	return true;
+}
+
 #if MMU_EMULATION
 // Perform an instruction fetch of 16 bits at the given addr.
 // Returns false on fault.
@@ -1965,10 +1992,18 @@ void Hart::runInstruction(uint32_t inst)
 void Hart::run()
 {
 	applyFRM();
+	auto *jit = &getPerCPU()->x86jit;
 	for(;;)
 	{
 		if (this->irqPending)
 			this->handlePendingInterrupts();
+
+		PhysAddr pcPhys;
+		if (!fetchInstructionPhys(&pcPhys, this->pc))
+			continue;
+
+		if (jit->tryJit(this, pcPhys))
+			continue;
 
 		// Fetch 16 bits at a time. Due to IALIGN=16, a 32-bit wide instruction
 		// may cross a page boundary and fault.
