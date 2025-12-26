@@ -21,8 +21,10 @@ enum MemoryRegionType {
 	MemRegionPayload,  // Used for passed kernel and initrd, must be preserved
 	// Reserved memory is just omitted from the list
 
+	// Following types are used during runtime
 	MemRegionTrampoline, // Used for SMP startup
 	MemRegionPageTables, // Used for host paging structures
+	MemRegionJIT, // JIT translated host code
 };
 
 // Packed to avoid ABI mismatches between EFI and Kernel
