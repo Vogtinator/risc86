@@ -1998,12 +1998,14 @@ void Hart::run()
 		if (this->irqPending)
 			this->handlePendingInterrupts();
 
+#if !NO_JIT
 		PhysAddr pcPhys;
 		if (!fetchInstructionPhys(&pcPhys, this->pc))
 			continue;
 
 		if (jit->tryJit(this, pcPhys))
 			continue;
+#endif
 
 		// Fetch 16 bits at a time. Due to IALIGN=16, a 32-bit wide instruction
 		// may cross a page boundary and fault.
