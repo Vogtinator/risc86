@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 
+#include "mem.h"
 #include "utils.h"
 
 #define SSTATUS_SIE (1ull << 1)
@@ -118,6 +119,8 @@ private:
 	void handlePendingInterrupts();
 	void handleSRET();
 
+	__attribute__((warn_unused_result))
+	bool fetchInstructionPhys(PhysAddr *physRes, uint64_t addr);
 	// Perform an instruction fetch of 16 bits at the given addr.
 	// Returns false on fault.
 	__attribute__((warn_unused_result))

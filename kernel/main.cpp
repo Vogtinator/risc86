@@ -67,8 +67,10 @@ void kernel_entry(KernelParams *params)
 
 	setupHPET();
 
-	for (unsigned int i = 0; i < MAX_CPUS; ++i)
+	for (unsigned int i = 0; i < MAX_CPUS; ++i) {
 		getPerCPUForOtherCPU(i)->x86mmu.init();
+		getPerCPUForOtherCPU(i)->x86jit.init();
+	}
 
 	auto secondaryCallback = [](unsigned int cpuNum) {
 		setupGDT(cpuNum);
