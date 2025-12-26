@@ -1,6 +1,7 @@
 #pragma once
 
 #include "hart.h"
+#include "x86jit.h"
 #include "x86mmu.h"
 
 // There is one instance of this struct per cpu.
@@ -9,6 +10,7 @@
 struct PerCpuState {
 	struct Hart hart;
 	X86MMU x86mmu;
+	X86JIT x86jit;
 	unsigned int cpu_id;
 };
 
