@@ -205,8 +205,9 @@ bool Hart::fetchInstruction(uint16_t *inst, uint64_t addr)
 	bool fault;
 	asm volatile("clc\n" // Clear carry flag
 	             "movw (%[addr]), %[res]\n" // Perform move
-	             "setc %[fault]" // Carry flag set by fault handler? -> Fault
-	             : [res] "=a" (res), [fault] "=r" (fault)
+	             // Carry flag is used as output directly (=@ccc)
+	             // "setc %[fault]" // Carry flag set by fault handler? -> Fault
+	             : [res] "=a" (res), [fault] "=@ccc" (fault)
 	             : [addr] "d" (addr) : "flags");
 
 	if (fault) {
@@ -225,8 +226,9 @@ bool Hart::virtRead(uint64_t addr, T *valuePtr)
 	bool fault;
 	asm volatile("clc\n" // Clear carry flag
 	             "mov (%[addr]), %[value]\n" // Perform move
-	             "setc %[fault]" // Carry flag set by fault handler? -> Fault
-	             : [value] "=a" (value), [fault] "=r" (fault)
+	             // Carry flag is used as output directly (=@ccc)
+	             // "setc %[fault]" // Carry flag set by fault handler? -> Fault
+	             : [value] "=a" (value), [fault] "=@ccc" (fault)
 	             : [addr] "d" (addr) : "flags");
 
 	if (fault) {
@@ -246,8 +248,9 @@ bool Hart::virtWrite(uint64_t addr, T value)
 	bool fault;
 	asm volatile("clc\n" // Clear carry flag
 	             "mov %[value], (%[addr])\n" // Perform move
-	             "setc %[fault]" // Carry flag set by fault handler? -> Fault
-	             : [fault] "=r" (fault)
+	             // Carry flag is used as output directly (=@ccc)
+	             // "setc %[fault]" // Carry flag set by fault handler? -> Fault
+	             : [fault] "=@ccc" (fault)
 	             : [value] "a" (value), [addr] "d" (addr) : "flags", "memory");
 
 	if (fault) {
