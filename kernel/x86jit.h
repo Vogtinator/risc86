@@ -17,6 +17,7 @@ public:
 	void reset();
 private:
 	const size_t JIT_REGION_SIZE = 8*1024*1024; // 8 MiB
+	const int MIN_TRANSLATION_SPACE = 64;
 
 	// Index for looking up translations.
 	// For now just caching the last one.
@@ -32,8 +33,8 @@ private:
 
 	// Append value (with memcpy) to the current code region pointer
 	// and advance it.
-	template <typename T> void emit(T value);
-	inline void emit8(uint8_t value) { emit(value); }
+	template <typename T> void emitRaw(T value);
+	inline void emit8(uint8_t value) { emitRaw(value); }
 
 	// Helpers for emitting x86 instructions
 	enum class X86Reg {
@@ -46,6 +47,9 @@ private:
 	using RVReg = uint8_t;
 
 	void emitREX(bool w, bool r, bool x, bool b);
+	void emitAddImmediate(X86Reg x86Reg, int32_t imm);
+	void emitMovRegReg(X86Reg from, X86Reg to);
+	void emitCliHlt(); // For debugging
 
 	// Low-level helpers for RV register management
 	const X86Reg hartPtrReg = X86Reg::RDI;
@@ -64,6 +68,7 @@ private:
 	// Changes reg map accordingly.
 	void markRVRegFlushed(RVReg rvReg);
 	X86Reg findFreeDynReg();
+	X86Reg mapRVRegForRead(RVReg rvReg, bool bits32Ok);
 	X86Reg mapRVRegForRead64(RVReg rvReg);
 	X86Reg mapRVRegForRead32(RVReg rvReg);
 	X86Reg mapRVRegForWrite32(RVReg rvReg);
