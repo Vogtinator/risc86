@@ -8,7 +8,9 @@
  * In JIT generated code, %rdi points to the current struct Hart,
  * which is used to load/store registers and PC.
  * r8-r15 are dynamically allocated and are used for hart register state.
- * The PC is not updated for each instruction but only on demand
+ * The PC is not updated for each instruction but only on demand.
+ * The generated code returns with a status code in $eax, that is either
+ * 0 on success or maps to scause in case of a fault.
  */
 
 /* Ideas for further optimization:
@@ -49,7 +51,13 @@ bool X86JIT::tryJit(Hart *hart, PhysAddr pcPhys)
 		lastTranslationCode = newCodeStart;
 	}
 
-	jumpToCode(hart, lastTranslationCode);
+	uint32_t scause = jumpToCode(hart, lastTranslationCode);
+
+	if (scause != 0) { // Fault?
+		// stval already set by the page fault handler
+		hart->handleInterrupt(scause, hart->stval);
+	}
+
 	return true;
 }
 
@@ -62,12 +70,17 @@ void X86JIT::reset()
 	lastTranslationCode = nullptr;
 }
 
-void X86JIT::jumpToCode(Hart *hart, uint8_t *code)
+uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 {
-	asm("call %A[code]" :: [code] "r" (code), "D" (hart)
+	uint32_t ret;
+	asm("call %A[code]"
+	    : "=a" (ret)
+	    : [code] "r" (code), "D" (hart)
 	    : "memory", "cc",
-	      "rax", "rcx", "rdx", "rbx",
+	      "rcx", "rdx", "rbx",
 	      "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15");
+
+	return ret;
 }
 
 void X86JIT::emitREX(bool w, bool r, bool x, bool b)
@@ -111,6 +124,17 @@ void X86JIT::emitMovRegReg(X86Reg from, X86Reg to)
 	emit8(0xC0 | (regLow3Bits(from) << 3) | regLow3Bits(to));
 }
 
+void X86JIT::emitXorRegReg(X86Reg x86Reg)
+{
+	// xor %x86reg, %x86reg
+	// No need for 64bit operation, 32 bit clears upper half
+	if (regREXBit(x86Reg))
+		emitREX(false, regREXBit(x86Reg), false, regREXBit(x86Reg));
+
+	emit8(0x31);
+	emit8(0xC0 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(x86Reg));
+}
+
 void X86JIT::emitCliHlt()
 {
 	emit8(0xfa); // cli
@@ -120,13 +144,7 @@ void X86JIT::emitCliHlt()
 void X86JIT::emitLoadRVReg(RVReg rvReg, X86Reg x86Reg)
 {
 	if (rvReg == 0) {
-		// xor %x86reg, %x86reg
-		// No need for 64bit operation, 32 bit clears upper half
-		if (regREXBit(x86Reg))
-			emitREX(false, regREXBit(x86Reg), false, regREXBit(x86Reg));
-
-		emit8(0x31);
-		emit8(0xC0 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(x86Reg));
+		emitXorRegReg(x86Reg);
 		return;
 	}
 
@@ -225,8 +243,15 @@ void X86JIT::emitSExtX86Reg(X86Reg x86Reg)
 	emit8(0xC0 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(x86Reg));
 }
 
-void X86JIT::emitRet()
+void X86JIT::emitRet(uint32_t retVal)
 {
+	if (retVal) {
+		// mov $retVal, %eax
+		emit8(0xB8);
+		emitRaw<uint32_t>(retVal);
+	} else
+		emitXorRegReg(X86Reg::RAX);
+
 	emit8(0xC3);
 }
 
@@ -366,6 +391,112 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 {
 	uint32_t opc = inst & 0x7Fu;
 	switch(opc) {
+	case 0x03u: // load
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		int32_t imm = int32_t(inst) >> 20u;
+
+		if (funct3 > 6)
+			return false;
+
+		// %rdx = rs1 + imm
+		X86Reg rs1X86 = mapRVRegForRead64(rs1);
+		emitMovRegReg(rs1X86, X86Reg::RDX);
+		emitAddImmediate(X86Reg::RDX, imm);
+
+		// clc
+		emit8(0xf8);
+
+		switch (funct3)
+		{
+		case 0u: // lb
+		case 4u: // lbu
+			// mov (%rdx), %al
+			emit8(0x8A); emit8(0x02);
+			break;
+		case 1u: // lh
+		case 5u: // lhu
+			// mov (%rdx), %ax
+			emit8(0x66); emit8(0x8B); emit8(0x02);
+			break;
+		case 2u: // lw
+		case 6u: // lwu
+			// mov (%rdx), %eax
+			emit8(0x8B); emit8(0x02);
+			break;
+		case 3u: // ld
+			// mov (%rdx), %rax
+			emit8(0x48); emit8(0x8B); emit8(0x02);
+			break;
+		default:
+			panic("Unknown load instruction");
+		}
+
+		// If no fault (carry clear), skip fault handling
+		emit8(0x73); // jnc off8
+		uint8_t *jmpOffPtr = codeRegionCurrent;
+		emit8(0); // off8 for jmp, will be adjusted below
+
+		// Fault handling: Flush regs and return
+		// Update PC and relative jmp in one go
+		emitAddPC(addr - lastHartPC);
+		// Leave translation
+		emitFlushRegsToHart();
+		emitRet(Hart::SCAUSE_LOAD_PAGE_FAULT);
+
+		int jmpOff = codeRegionCurrent - jmpOffPtr - 1;
+		if (jmpOff < 0 || jmpOff >= INT8_MAX)
+			panic("jmp offset too big");
+
+		*jmpOffPtr = int8_t(jmpOff);
+
+		// No fault: Store result in rd
+		X86Reg rdX86 = mapRVRegForWrite64(rd);
+		switch (funct3)
+		{
+		case 0u: // lb
+			// movsx %al, %rdX86
+			emitREX(true, regREXBit(rdX86), false, false);
+			emit8(0x0F); emit8(0xBE);
+			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
+			break;
+		case 4u: // lbu
+			// movzx %al, %rdX86
+			emitREX(true, regREXBit(rdX86), false, false);
+			emit8(0x0F); emit8(0xB6);
+			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
+			break;
+		case 1u: // lh
+			// movsx %ax, %rdX86
+			emitREX(true, regREXBit(rdX86), false, false);
+			emit8(0x0F); emit8(0xBF);
+			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
+			break;
+		case 5u: // lhu
+			// movzx %ax, %rdX86
+			emitREX(true, regREXBit(rdX86), false, false);
+			emit8(0x0F); emit8(0xB7);
+			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
+			break;
+		case 2u: // lw
+			// movsx %eax, %rdX86
+			emitREX(true, regREXBit(rdX86), false, false);
+			emit8(0x63);
+			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
+			break;
+		case 6u: // lwu
+		case 3u: // ld
+			// No sign extension needed
+			emitMovRegReg(X86Reg::RAX, rdX86);
+			break;
+		default:
+			panic("Unknown load instruction");
+		}
+
+		return true;
+	}
 	case 0x17u: // auipc
 	{
 		uint32_t rd = (inst >> 7u) & 0x1Fu;
@@ -431,7 +562,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		emitAddPC(addr - lastHartPC + imm);
 		// Leave translation
 		emitFlushRegsToHart();
-		emitRet();
+		emitRet(0);
 
 		int jmpOff = codeRegionCurrent - jmpOffPtr - 1;
 		if (jmpOff < 0 || jmpOff >= INT8_MAX)
@@ -558,7 +689,7 @@ bool X86JIT::translate(PhysAddr entry)
 		emitUpdateHartPC(addr);
 
 	emitFlushRegsToHart();
-	emitRet();
+	emitRet(0);
 
 	return true;
 }
