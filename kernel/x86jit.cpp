@@ -12,7 +12,10 @@
  */
 
 /* Ideas for further optimization:
+ * - Relative jumps to the beginning of the current translation
+ *   (loops) should stay inside the generated code
  * - Optimize findFreeDynReg by having an inverse map?
+ * - Have the generated code push/pop clobbered dyn regs?
  * - Replace rvRegsToX86.inUse with generation counter?
  * - Only save/restore registers that are used by mappings?
  * - More special cases for reads from (0 immediate?) and writes to w0.
@@ -375,6 +378,67 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 
 		// add $imm, %rvReg
 		emitAddImmediate(rdX86, imm);
+		return true;
+	}
+	case 0x63u: // branch
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		uint32_t imm12 = inst >> 31u;
+		uint32_t imm105 = (inst >> 25u) & 0x3fu;
+		uint32_t imm41 = (inst >> 8u) & 0xfu;
+		uint32_t imm11 = (inst >> 7u) & 0x1u;
+		int32_t imm = int32_t(((imm12 << 12u) | (imm11 << 11u) | (imm105 << 5u) | (imm41 << 1u)) << 19u) >> 19u;
+
+		X86Reg rs1X86 = mapRVRegForRead64(rs1),
+		       rs2X86 = mapRVRegForRead64(rs2);
+
+		// cmp %rs2X86, %rs1X86
+		emitREX(true, regREXBit(rs2X86), false, regREXBit(rs1X86));
+		emit8(0x39);
+		emit8(0xC0 | (regLow3Bits(rs2X86) << 3) | regLow3Bits(rs1X86));
+
+		// If comparison false, skip the jump away
+		switch (funct3)
+		{
+		case 0u: // beq
+			emit8(0x75); // jne off8
+			break;
+		case 1u: // bne
+			emit8(0x74); // je off8
+			break;
+		case 4u: // blt
+			emit8(0x7D); // jge off8
+			break;
+		case 5u: // bge
+			emit8(0x7C); // jl off8
+			break;
+		case 6u: // bltu
+			emit8(0x73); // jae off8
+			break;
+		case 7u: // bgeu
+			emit8(0x72); // jb off8
+			break;
+		default:
+			panic("Unsupported branch");
+		}
+
+		uint8_t *jmpOffPtr = codeRegionCurrent;
+		emit8(0); // off8 for jmp, will be adjusted below
+
+		// Update PC and relative jmp in one go
+		emitAddPC(addr - lastHartPC + imm);
+		// Leave translation
+		emitFlushRegsToHart();
+		emitRet();
+
+		int jmpOff = codeRegionCurrent - jmpOffPtr - 1;
+		if (jmpOff < 0 || jmpOff >= INT8_MAX)
+			panic("jmp offset too big");
+
+		*jmpOffPtr = int8_t(jmpOff);
+
 		return true;
 	}
 	case 0x67u: // jalr
