@@ -98,6 +98,14 @@ void X86JIT::emitREX(bool w, bool r, bool x, bool b)
 	emit8(rex);
 }
 
+void X86JIT::emitMovImmediate32(X86Reg x86Reg, int32_t imm)
+{
+	// mov $imm32, %x86Reg
+	emitREX(false, false, false, regREXBit(x86Reg));
+	emit8(0xB8 | regLow3Bits(x86Reg));
+	emitRaw<int32_t>(imm);
+}
+
 void X86JIT::emitAddImmediate(X86Reg x86Reg, int32_t imm)
 {
 	if (imm >= INT8_MIN && imm <= INT8_MAX) {
@@ -575,6 +583,15 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			panic("jmp offset too big");
 
 		*jmpOffPtr = int8_t(jmpOff);
+		return true;
+	}
+	case 0x37u: // lui
+	{
+		uint32_t rd = (inst >> 7u) & 0x1Fu;
+		int32_t imm = int32_t(inst & 0xFFFFF000u);
+
+		X86Reg rdX86 = mapRVRegForWrite32(rd);
+		emitMovImmediate32(rdX86, imm);
 		return true;
 	}
 	case 0x63u: // branch
