@@ -76,6 +76,7 @@ private:
 	X86Reg mapRVRegForRead32(RVReg rvReg);
 	X86Reg mapRVRegForWrite32(RVReg rvReg);
 	X86Reg mapRVRegForWrite64(RVReg rvReg);
+	X86Reg mapRVRegForReadWrite64(RVReg rvReg);
 	void emitFlushRegsToHart();
 
 	// State during generation of translations.
