@@ -16,6 +16,7 @@
 /* Ideas for further optimization:
  * - Relative jumps to the beginning of the current translation
  *   (loops) should stay inside the generated code
+ * - Make emitAddImmediate with 0 a no-op
  * - Optimize findFreeDynReg by having an inverse map?
  * - Have the generated code push/pop clobbered dyn regs?
  * - Replace rvRegsToX86.inUse with generation counter?
@@ -372,6 +373,13 @@ X86JIT::X86Reg X86JIT::mapRVRegForWrite32(RVReg rvReg)
 	return mapEntry.x86reg;
 }
 
+X86JIT::X86Reg X86JIT::mapRVRegForReadWrite64(RVReg rvReg)
+{
+	X86Reg ret = mapRVRegForRead64(rvReg);
+	(void) mapRVRegForWrite64(rvReg);
+	return ret;
+}
+
 void X86JIT::emitFlushRegsToHart()
 {
 	for (int rv = 0; rv < 32; ++rv)
@@ -392,6 +400,21 @@ void X86JIT::emitUpdateHartPC(PhysAddr curPC)
 
 bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 {
+	if ((inst & 0b111'0'11111'00000'11) == 0b000'0'00000'00000'01) { // c.nop (before c.addi)
+		// nop
+		return true;
+	} else if ((inst & 0b111'0'00000'00000'11) == 0b000'0'00000'00000'01) { // c.addi (after c.nop)
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm40 = (inst >>  2) & 0x1F;
+
+		int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
+		uint32_t rd = (inst >> 7) & 0x1F;
+
+		X86Reg rdX86 = mapRVRegForReadWrite64(rd);
+		emitAddImmediate(rdX86, imm);
+		return true;
+	}
+
 	return false;
 }
 
