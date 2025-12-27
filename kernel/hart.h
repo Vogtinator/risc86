@@ -103,6 +103,8 @@ struct Hart {
 	void run();
 
 private:
+	friend class X86JIT;
+
 	void handleInterrupt(uint64_t cause, uint64_t stval);
 	void handlePendingInterrupts();
 	void handleSRET();

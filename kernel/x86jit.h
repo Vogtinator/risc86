@@ -17,13 +17,14 @@ public:
 	void reset();
 private:
 	const size_t JIT_REGION_SIZE = 8*1024*1024; // 8 MiB
-	const int MIN_TRANSLATION_SPACE = 64;
+	const int MIN_TRANSLATION_SPACE = 128;
 
 	// Index for looking up translations.
 	// For now just caching the last one.
 	PhysAddr lastTranslationPCPhys;
 	uint8_t *lastTranslationCode;
-	void jumpToCode(Hart *hart, uint8_t *code);
+	__attribute__((warn_unused_result))
+	uint32_t jumpToCode(Hart *hart, uint8_t *code);
 
 	// Region where the generated code is stored and executed from
 	uint8_t *codeRegionStart, *codeRegionEnd;
@@ -49,6 +50,7 @@ private:
 	void emitREX(bool w, bool r, bool x, bool b);
 	void emitAddImmediate(X86Reg x86Reg, int32_t imm);
 	void emitMovRegReg(X86Reg from, X86Reg to);
+	void emitXorRegReg(X86Reg x86Reg);
 	void emitCliHlt(); // For debugging
 
 	// Low-level helpers for RV register management
@@ -59,7 +61,7 @@ private:
 	void emitAddPC(int32_t value);
 	void emitStoreRVReg64(X86Reg x86Reg, RVReg rvReg);
 	void emitSExtX86Reg(X86Reg x86Reg); // 32->64 sign extension
-	void emitRet();
+	void emitRet(uint32_t retVal);
 
 	// High-level helpers for RV register management
 	const X86Reg x86DynRegFirst = X86Reg::R8, x86DynRegLast = X86Reg::R15;
