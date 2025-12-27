@@ -440,7 +440,6 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		emit8(0); // off8 for jmp, will be adjusted below
 
 		// Fault handling: Flush regs and return
-		// Update PC and relative jmp in one go
 		emitAddPC(addr - lastHartPC);
 		// Leave translation
 		emitFlushRegsToHart();
@@ -509,6 +508,73 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 
 		// add $imm, %rvReg
 		emitAddImmediate(rdX86, imm);
+		return true;
+	}
+	case 0x23u: // store
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		int32_t imm = ((int32_t(inst) >> 25u) << 5u) | ((inst >> 7u) & 0x1Fu);
+
+		if (funct3 > 3)
+			return false;
+
+		// %rdx = rs1 + imm
+		X86Reg rs1X86 = mapRVRegForRead64(rs1);
+		emitMovRegReg(rs1X86, X86Reg::RDX);
+		emitAddImmediate(X86Reg::RDX, imm);
+
+		// %rax = rs2
+		X86Reg rs2X86;
+		if (funct3 == 3)
+			rs2X86 = mapRVRegForRead64(rs2);
+		else
+			rs2X86 = mapRVRegForRead32(rs2);
+
+		emitMovRegReg(rs2X86, X86Reg::RAX);
+
+		// clc
+		emit8(0xf8);
+
+		switch (funct3)
+		{
+		case 0u: // sb
+			// mov %al, (%rdx)
+			emit8(0x88); emit8(0x02);
+			break;
+		case 1u: // sh
+			// mov %ax, (%rdx)
+			emit8(0x66); emit8(0x89); emit8(0x02);
+			break;
+		case 2u: // sw
+			// mov %eax, (%rdx)
+			emit8(0x89); emit8(0x02);
+			break;
+		case 3u: // sd
+			// mov %rax, (%rdx)
+			emit8(0x48); emit8(0x89); emit8(0x02);
+			break;
+		default:
+			panic("Unknown store");
+		}
+
+		// If no fault (carry clear), skip fault handling
+		emit8(0x73); // jnc off8
+		uint8_t *jmpOffPtr = codeRegionCurrent;
+		emit8(0); // off8 for jmp, will be adjusted below
+
+		// Fault handling: Flush regs and return
+		emitAddPC(addr - lastHartPC);
+		// Leave translation
+		emitFlushRegsToHart();
+		emitRet(Hart::SCAUSE_STORE_PAGE_FAULT);
+
+		int jmpOff = codeRegionCurrent - jmpOffPtr - 1;
+		if (jmpOff < 0 || jmpOff >= INT8_MAX)
+			panic("jmp offset too big");
+
+		*jmpOffPtr = int8_t(jmpOff);
 		return true;
 	}
 	case 0x63u: // branch
