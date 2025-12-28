@@ -17,7 +17,7 @@ public:
 	void reset();
 private:
 	const size_t JIT_REGION_SIZE = 8*1024*1024; // 8 MiB
-	const int MIN_TRANSLATION_SPACE = 128;
+	const int MIN_TRANSLATION_SPACE = 256;
 
 	// Index for looking up translations.
 	// For now just caching the last one.
@@ -79,8 +79,18 @@ private:
 	X86Reg mapRVRegForReadWrite64(RVReg rvReg);
 	void emitFlushRegsToHart();
 
+	// Emit jmp away to a new PC, leaving this translation.
+	// Tries to loop back to the beginning of this translation if possible.
+	void emitPCRelativeJump(PhysAddr pcPhys, int32_t imm);
+
 	// State during generation of translations.
+	PhysAddr thisTranslationStartPC;
+	uint8_t *thisTranslationStartCode;
+
+	// Some instruction need the correct value of hart->pc.
+	// This stores the value hart->pc currently has, so that the needed diff can be applied.
 	PhysAddr lastHartPC;
+	// Updates hart->pc to point to the currently active translation.
 	void emitUpdateHartPC(PhysAddr curPC);
 
 	// If true, the last translation did an unconditional flush and return.
