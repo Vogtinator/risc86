@@ -218,7 +218,9 @@ void X86JIT::emitRaw(T value)
 	if (codeRegionCurrent + sizeof(value) >= codeRegionEnd)
 		panic("Attempted to write past code region end");
 
-	memcpy(codeRegionCurrent, &value, sizeof(value));
+	// TODO: Why does clang not pick the builtin here when using plain memcpy?
+	__builtin_memcpy(codeRegionCurrent, &value, sizeof(value));
+
 	codeRegionCurrent += sizeof(value);
 }
 
