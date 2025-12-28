@@ -198,6 +198,9 @@ void X86JIT::emitStorePC(X86Reg x86Reg)
 
 void X86JIT::emitAddPC(int32_t value)
 {
+	if (value == 0)
+		return;
+
 	if (int8_t(value) == value) {
 		// addq $value8, off32(%rdi)
 		emitREX(true, false, false, regREXBit(hartPtrReg));
