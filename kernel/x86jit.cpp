@@ -22,7 +22,11 @@
  * - Replace rvRegsToX86.inUse with generation counter?
  * - Only save/restore registers that are used by mappings?
  * - More special cases for reads from (0 immediate?) and writes to w0.
+ *   (esp. jal?)
  * - Track immediate values in general and combine?
+ * - Pad new translations so that that don't invalidate old ones in the i$?
+ * - More eager flushing of dirty regs also in the hot path,
+ *   so that there's less flushing in early exit (cond jump, fault handle) paths?
  */
 
 void X86JIT::init()
@@ -388,6 +392,44 @@ void X86JIT::emitFlushRegsToHart()
 		emitFlushRVReg(rv);
 }
 
+void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
+{
+	// Also include the hart->pc update
+	int64_t imm64 = pcPhys - lastHartPC + imm;
+	if (imm64 < INT32_MIN || imm64 > INT32_MAX)
+		panic("Offset does not fit");
+
+	emitAddPC(imm64);
+	emitFlushRegsToHart();
+
+	// Calculate the new PC
+	auto newPcPhys = pcPhys + imm;
+
+	// If it's not the beginning of this translation, just exit
+	if (newPcPhys != thisTranslationStartPC) {
+		emitRet(0);
+		return;
+	}
+
+	// Otherwise, loop back to the start!
+	int32_t jmpOff = thisTranslationStartCode - codeRegionCurrent;
+	// TODO: ret in case there's an interrupt
+
+	// Short jump?
+	int32_t jmpOffShort = jmpOff - 2;
+	if (jmpOffShort >= INT8_MIN && jmpOffShort <= INT8_MAX) {
+		// jmp off8
+		emit8(0xEB);
+		emitRaw<int8_t>(jmpOffShort);
+		return;
+	}
+
+	int32_t jmpOffNear = jmpOff - 5;
+	// jmp off32
+	emit8(0xE9);
+	emitRaw<int32_t>(jmpOffNear);
+}
+
 void X86JIT::emitUpdateHartPC(PhysAddr curPC)
 {
 	if (lastHartPC == curPC)
@@ -666,11 +708,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		uint8_t *jmpOffPtr = codeRegionCurrent;
 		emit8(0); // off8 for jmp, will be adjusted below
 
-		// Update PC and relative jmp in one go
-		emitAddPC(addr - lastHartPC + imm);
-		// Leave translation
-		emitFlushRegsToHart();
-		emitRet(0);
+		emitPCRelativeJump(addr, imm);
 
 		int jmpOff = codeRegionCurrent - jmpOffPtr - 1;
 		if (jmpOff < 0 || jmpOff >= INT8_MAX)
@@ -709,6 +747,9 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			X86Reg rdX86 = mapRVRegForWrite64(rd);
 			emitMovRegReg(X86Reg::RAX, rdX86);
 		}
+
+		emitFlushRegsToHart();
+		emitRet(0);
 		return true;
 	}
 	case 0x6fu: // jal
@@ -729,7 +770,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			emitAddImmediate(rdX86, 4);
 		}
 
-		emitAddPC(imm);
+		emitPCRelativeJump(addr, imm);
 
 		jumpsAway = true;
 		return true;
@@ -751,6 +792,8 @@ bool X86JIT::translate(PhysAddr entry)
 	for (int i = 0; i < 32; ++i)
 		rvRegsToX86[i] = {};
 
+	thisTranslationStartPC = entry;
+	thisTranslationStartCode = codeRegionCurrent;
 	lastHartPC = entry;
 	jumpsAway = false;
 
@@ -792,12 +835,12 @@ bool X86JIT::translate(PhysAddr entry)
 	if (addr == entry)
 		return false;
 
-	// Save new PC if the last instruction doesn't set it.
-	if (!jumpsAway)
+	// Leave the generated code if the last translation didn't do that already.
+	if (!jumpsAway) {
 		emitUpdateHartPC(addr);
-
-	emitFlushRegsToHart();
-	emitRet(0);
+		emitFlushRegsToHart();
+		emitRet(0);
+	}
 
 	return true;
 }
