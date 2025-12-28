@@ -5,7 +5,14 @@
 // general-regs-only shouldn't be necessary, but there's some issue
 // with a misaligned stack which causes movaps to fault.
 #define X86_IRQ_HANDLER __attribute__((interrupt)) __attribute__((target("general-regs-only")))
-#define CALLED_FROM_IRQ __attribute__((no_caller_saved_registers)) __attribute__((target("general-regs-only")))
+// This should be __attribute__((no_caller_saved_registers)), but this triggers some LLVM bugs:
+// With -O0: https://github.com/llvm/llvm-project/issues/173800
+// Without LTO: functions that return structs clobber %rax which the callers don't expect.
+// Use __attribute__((target("general-regs-only"))) instead and require -O1
+#define CALLED_FROM_IRQ __attribute__((target("general-regs-only")))
+#if defined(__clang__) && !defined(__OPTIMIZE__)
+#error Must turn on optimizations to avoid clang bugs
+#endif
 
 // Frame as pushed by the CPU and passed to
 // functions with __attribute__((interrupt)).
