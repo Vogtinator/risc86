@@ -832,8 +832,40 @@ void Hart::runInstruction(uint32_t inst)
 {
 	uint32_t opc = inst & 0x7Fu;
 	switch(opc) {
-	case 0x0fu: // fences
+	case 0x0fu: // misc mem
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		switch (funct3)
+		{
+		case 0: { // fence
+			uint8_t succ = (inst >> 20) & 0xf;
+			uint8_t pred = (inst >> 24) & 0xf;
+			uint8_t fm = (inst >> 28);
+
+			(void) fm; (void) rd; (void) rs1; // Ignored according to spec.
+
+			bool lfence = (succ | pred) & 0b1010;
+			bool sfence = (succ | pred) & 0b0101;
+
+			// TODO: Make fence.tso (fence rw, rw with fm == 1) a noop?
+			if (lfence && sfence)
+				asm volatile("mfence");
+			else if (lfence)
+				asm volatile("lfence");
+			else if (sfence)
+				asm volatile("sfence");
+
+			break;
+		}
+		case 1: // fence.i
+			break;
+		default:
+			panic("Unknown misc-mem instruction %x", inst);
+		}
 		break;
+	}
 	case 0x03u: // load
 	{
 		uint32_t funct3 = (inst >> 12u) & 7u;

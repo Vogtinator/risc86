@@ -17,7 +17,7 @@ static const uint64_t
 	KERNEL_PHYS_END   = 0xFFFFA00000000000UL;
 
 enum MemoryRegionType {
-	MemRegionFree = 0, // Free for any purposse
+	MemRegionFree = 0, // Free for any purpose
 	MemRegionPayload,  // Used for passed kernel and initrd, must be preserved
 	// Reserved memory is just omitted from the list
 
