@@ -83,6 +83,9 @@ private:
 	// Tries to loop back to the beginning of this translation if possible.
 	void emitPCRelativeJump(PhysAddr pcPhys, int32_t imm);
 
+	// For load/store: If carry set, leave the translation with given scause.
+	void emitLeaveOnMemFault(PhysAddr curPC, uint32_t scause);
+
 	// State during generation of translations.
 	PhysAddr thisTranslationStartPC;
 	uint8_t *thisTranslationStartCode;

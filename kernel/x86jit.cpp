@@ -364,6 +364,7 @@ X86JIT::X86Reg X86JIT::mapRVRegForWrite64(RVReg rvReg)
 		mapEntry.x86reg = findFreeDynReg();
 	}
 
+	mapEntry.bits32 = false;
 	mapEntry.dirty = true;
 	mapEntry.inUse = true;
 	return mapEntry.x86reg;
@@ -433,6 +434,26 @@ void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
 	emitRaw<int32_t>(jmpOffNear);
 }
 
+void X86JIT::emitLeaveOnMemFault(PhysAddr curPC, uint32_t scause)
+{
+	// If no fault (carry clear), skip fault handling
+	emit8(0x73); // jnc off8
+	uint8_t *jmpOffPtr = codeRegionCurrent;
+	emit8(0); // off8 for jmp, will be adjusted below
+
+	// Fault handling: Flush regs and return
+	emitAddPC(curPC - lastHartPC);
+	// Leave translation
+	emitFlushRegsToHart();
+	emitRet(scause);
+
+	int jmpOff = codeRegionCurrent - jmpOffPtr - 1;
+	if (jmpOff < INT8_MIN || jmpOff >= INT8_MAX)
+		panic("jmp offset too big");
+
+	*jmpOffPtr = int8_t(jmpOff);
+}
+
 void X86JIT::emitUpdateHartPC(PhysAddr curPC)
 {
 	if (lastHartPC == curPC)
@@ -447,7 +468,36 @@ void X86JIT::emitUpdateHartPC(PhysAddr curPC)
 
 bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 {
-	if ((inst & 0b111'0'11111'00000'11) == 0b000'0'00000'00000'01) { // c.nop (before c.addi)
+	if ((inst & 0xE003) == 0xA001) { // c.j
+		// This is atrocious.
+		uint16_t imm11 = (inst >> 12) & 1,
+		        imm4  = (inst >> 11) & 1,
+		        imm98 = (inst >>  9) & 3,
+		        imm10 = (inst >>  8) & 1,
+		        imm6  = (inst >>  7) & 1,
+		        imm7  = (inst >>  6) & 1,
+		        imm31 = (inst >>  3) & 7,
+		        imm5  = (inst >>  2) & 1;
+
+		uint16_t imm = (imm11 << 11) | (imm10 << 10) | (imm98 << 8)
+		               | (imm7 << 7) | (imm6 << 6) | (imm5 << 5)
+		               | (imm4 << 4) | (imm31 << 1);
+
+		const int16_t offs = int16_t(imm << 4) >> 4;
+
+		emitPCRelativeJump(addr, offs);
+		return true;
+	} else if ((inst & 0xE003) == 0x4001) { // c.li
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm40 = (inst >> 2) & 0x1F;
+
+		int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
+		uint32_t rd = (inst >> 7) & 0x1F;
+
+		X86Reg rdX86 = mapRVRegForWrite32(rd);
+		emitMovImmediate32(rdX86, imm);
+		return true;
+	} else if ((inst & 0b111'0'11111'00000'11) == 0b000'0'00000'00000'01) { // c.nop (before c.addi)
 		// nop
 		return true;
 	} else if ((inst & 0b111'0'00000'00000'11) == 0b000'0'00000'00000'01) { // c.addi (after c.nop)
@@ -459,6 +509,82 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 
 		X86Reg rdX86 = mapRVRegForReadWrite64(rd);
 		emitAddImmediate(rdX86, imm);
+		return true;
+	} else if ((inst & 0b111'000000'00000'11) == 0b111'000000'00000'10) { // c.sdsp
+		uint16_t imm53 = (inst >> 10) & 7,
+		        imm86 = (inst >>  7) & 7;
+
+		uint16_t off = (imm86 << 6) | (imm53 << 3);
+
+		uint32_t rs2 = (inst >> 2) & 31;
+
+		// %rdx = x2 + imm
+		X86Reg spX86 = mapRVRegForRead64(2);
+		emitMovRegReg(spX86, X86Reg::RDX);
+		emitAddImmediate(X86Reg::RDX, off);
+
+		// %rax = rs2
+		X86Reg rs2X86 = mapRVRegForRead64(rs2);
+		emitMovRegReg(rs2X86, X86Reg::RAX);
+
+		// clc
+		emit8(0xf8);
+
+		// mov %rax, (%rdx)
+		emit8(0x48); emit8(0x89); emit8(0x02);
+
+		emitLeaveOnMemFault(addr, Hart::SCAUSE_STORE_PAGE_FAULT);
+		return true;
+	}  else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'10) { // c.ldsp
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm43 = (inst >>  5) & 3,
+		        imm86 = (inst >>  2) & 7;
+
+		uint16_t off = (imm86 << 6) | (imm5 << 5) | (imm43 << 3);
+
+		uint32_t rd = (inst >> 7) & 31;
+
+		if (rd == 0)
+			panic("Reserved instruction %x", inst);
+
+		// %rdx = x2 + imm
+		X86Reg spX86 = mapRVRegForRead64(2);
+		emitMovRegReg(spX86, X86Reg::RDX);
+		emitAddImmediate(X86Reg::RDX, off);
+
+		// clc
+		emit8(0xf8);
+
+		// mov (%rdx), %rax
+		emit8(0x48); emit8(0x8B); emit8(0x02);
+
+		emitLeaveOnMemFault(addr, Hart::SCAUSE_LOAD_PAGE_FAULT);
+
+		X86Reg rdX86 = mapRVRegForWrite64(rd);
+		emitMovRegReg(X86Reg::RAX, rdX86);
+		return true;
+	} else if ((inst & 0b111'1'00000'11111'11) == 0b100'0'00000'00000'10) { // c.jr (before c.mv)
+		uint32_t rs1 = (inst >> 7) & 0x1F;
+
+		if (rs1 == 0)
+			panic("Reserved c.???");
+
+		// hart->pc = getReg(rs1)
+		X86Reg rs1X86 = mapRVRegForRead64(rs1);
+		emitStorePC(rs1X86);
+
+		jumpsAway = true;
+		emitFlushRegsToHart();
+		emitRet(0);
+		return true;
+	} else if ((inst & 0b111'1'00000'00000'11) == 0b100'0'00000'00000'10) { // c.mv (after c.jr)
+		uint32_t rs2 = (inst >> 2) & 0x1F,
+		        rd  = (inst >> 7) & 0x1F;
+
+		X86Reg rs2X86 = mapRVRegForRead64(rs2),
+		       rdX86 = mapRVRegForWrite64(rd);
+
+		emitMovRegReg(rs2X86, rdX86);
 		return true;
 	}
 
@@ -512,22 +638,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			panic("Unknown load instruction");
 		}
 
-		// If no fault (carry clear), skip fault handling
-		emit8(0x73); // jnc off8
-		uint8_t *jmpOffPtr = codeRegionCurrent;
-		emit8(0); // off8 for jmp, will be adjusted below
-
-		// Fault handling: Flush regs and return
-		emitAddPC(addr - lastHartPC);
-		// Leave translation
-		emitFlushRegsToHart();
-		emitRet(Hart::SCAUSE_LOAD_PAGE_FAULT);
-
-		int jmpOff = codeRegionCurrent - jmpOffPtr - 1;
-		if (jmpOff < 0 || jmpOff >= INT8_MAX)
-			panic("jmp offset too big");
-
-		*jmpOffPtr = int8_t(jmpOff);
+		emitLeaveOnMemFault(addr, Hart::SCAUSE_LOAD_PAGE_FAULT);
 
 		// No fault: Store result in rd
 		X86Reg rdX86 = mapRVRegForWrite64(rd);
@@ -637,22 +748,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			panic("Unknown store");
 		}
 
-		// If no fault (carry clear), skip fault handling
-		emit8(0x73); // jnc off8
-		uint8_t *jmpOffPtr = codeRegionCurrent;
-		emit8(0); // off8 for jmp, will be adjusted below
-
-		// Fault handling: Flush regs and return
-		emitAddPC(addr - lastHartPC);
-		// Leave translation
-		emitFlushRegsToHart();
-		emitRet(Hart::SCAUSE_STORE_PAGE_FAULT);
-
-		int jmpOff = codeRegionCurrent - jmpOffPtr - 1;
-		if (jmpOff < 0 || jmpOff >= INT8_MAX)
-			panic("jmp offset too big");
-
-		*jmpOffPtr = int8_t(jmpOff);
+		emitLeaveOnMemFault(addr, Hart::SCAUSE_STORE_PAGE_FAULT);
 		return true;
 	}
 	case 0x37u: // lui
