@@ -691,6 +691,111 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 
 		return true;
 	}
+	case 0x13u: // integer immediate
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		int64_t imm = int32_t(inst) >> 20u;
+		uint64_t rawimm = inst >> 20u;
+
+		X86Reg rs1X86 = mapRVRegForRead64(rs1),
+		       rdX86 = mapRVRegForWrite64(rd);
+
+		switch (funct3)
+		{
+		case 0x0u: // addi
+			// lea off32(%rs1X86), %rdX86
+			emitREX(true, regREXBit(rdX86), false, regREXBit(rs1X86));
+			emit8(0x8D);
+			emit8(0x80 | (regLow3Bits(rdX86) << 3) | regLow3Bits(rs1X86));
+			emitRaw<int32_t>(imm);
+			return true;
+		case 0x1u: // slli
+		case 0x5u: { // srli and srai
+			emitMovRegReg(rs1X86, rdX86);
+			uint8_t shiftSubOp = 0;
+			if (funct3 == 1 && (rawimm >> 6u) == 0) { // slli
+				shiftSubOp = 4; // shl
+			} else if (funct3 == 5 && (rawimm >> 6u) == 0) { // srli
+				shiftSubOp = 5; // shr
+			} else if (funct3 == 5 && (rawimm >> 6u) == 0x10) { // sari
+				shiftSubOp = 7; // sar
+			} else
+				panic("Shift not supported");
+
+			// $shiftSubOp imm8, %rdX86
+			emitREX(true, false, false, regREXBit(rdX86));
+			emit8(0xC1);
+			emit8(0xC0 | (shiftSubOp << 3) | regLow3Bits(rdX86));
+			emitRaw<int8_t>(rawimm & 63u);
+
+			return true;
+		} case 0x2u: // slti
+			// cmp imm32, %rs1X86
+			emitREX(true, false, false, regREXBit(rs1X86));
+			emit8(0x81);
+			emit8(0xC0 | (7 << 3) | regLow3Bits(rs1X86));
+			emitRaw<int32_t>(imm);
+
+			// setl %al
+			emit8(0x0F); emit8(0x9C); emit8(0xC0);
+
+			// movzsx %al, %rdX86
+			emitREX(true, regREXBit(rdX86), false, false);
+			emit8(0x0F); emit8(0xB6);
+			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
+
+			return true;
+		case 0x3u: // sltiu
+			// mov $imm, %eax
+			emit8(0xb8);
+			emitRaw<uint32_t>(rawimm);
+
+			// cmp %rax, %rs1X86
+			emitREX(true, regREXBit(X86Reg::RAX), false, regREXBit(rs1X86));
+			emit8(0x39);
+			emit8(0xC0 | (regLow3Bits(X86Reg::RAX) << 3) | regLow3Bits(rs1X86));
+
+			// setb %al
+			emit8(0x0F); emit8(0x92); emit8(0xC0);
+
+			// movzsx %al, %rdX86
+			emitREX(true, regREXBit(rdX86), false, false);
+			emit8(0x0F); emit8(0xB6);
+			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
+
+			return true;
+		case 0x4u: // xori
+			emitMovRegReg(rs1X86, rdX86);
+			// xor imm32, %rdX86
+			emitREX(true, false, false, regREXBit(rdX86));
+			emit8(0x81);
+			emit8(0xC0 | (6 << 3) | regLow3Bits(rdX86));
+			emitRaw<int32_t>(imm);
+			return true;
+		case 0x6u: // ori
+			emitMovRegReg(rs1X86, rdX86);
+			// xor imm32, %rdX86
+			emitREX(true, false, false, regREXBit(rdX86));
+			emit8(0x81);
+			emit8(0xC0 | (1 << 3) | regLow3Bits(rdX86));
+			emitRaw<int32_t>(imm);
+			return true;
+		case 0x7u: // andi
+			emitMovRegReg(rs1X86, rdX86);
+			// and imm32, %rdX86
+			emitREX(true, false, false, regREXBit(rdX86));
+			emit8(0x81);
+			emit8(0xC0 | (4 << 3) | regLow3Bits(rdX86));
+			emitRaw<int32_t>(imm);
+			return true;
+		default:
+			return false;
+		}
+
+		return true;
+	}
 	case 0x17u: // auipc
 	{
 		uint32_t rd = (inst >> 7u) & 0x1Fu;
