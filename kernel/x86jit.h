@@ -6,6 +6,7 @@
 class X86JIT
 {
 public:
+	X86JIT();
 	// Allocate memory for the generated code
 	void init();
 
@@ -19,10 +20,6 @@ private:
 	const size_t JIT_REGION_SIZE = 8*1024*1024; // 8 MiB
 	const int MIN_TRANSLATION_SPACE = 256;
 
-	// Index for looking up translations.
-	// For now just caching the last one.
-	PhysAddr lastTranslationPCPhys;
-	uint8_t *lastTranslationCode;
 	__attribute__((warn_unused_result))
 	uint32_t jumpToCode(Hart *hart, uint8_t *code);
 
@@ -124,4 +121,24 @@ private:
 	bool translateInstruction(PhysAddr addr, uint32_t inst);
 
 	bool translate(PhysAddr entry);
+
+	template <typename Key, typename Result, size_t numBuckets, size_t entriesPerBucket>
+	class CodeHashMap {
+	public:
+		CodeHashMap() { clear(); }
+		void insert(Key key, Result result);
+		bool lookup(Key key, Result *result);
+		void clear();
+	private:
+		size_t bucketForKey(Key key);
+		struct Bucket {
+			struct Entry {
+				Key key;
+				Result result;
+			} entries[entriesPerBucket];
+			size_t numEntries;
+		} buckets[numBuckets];
+	};
+
+	CodeHashMap<PhysAddr, uint8_t*, 64, 64> codeHashMap;
 };
