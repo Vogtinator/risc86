@@ -297,6 +297,12 @@ X86JIT::X86Reg X86JIT::findFreeDynReg()
 {
 	// Try to find a free register
 	for (X86Reg r = x86DynRegFirst; r < x86DynRegLast; r = X86Reg(uint8_t(r) + 1)) {
+		if (r == X86Reg::R12) {
+			// Its three low bits are the same as %rsp, so %r12 also gets special
+			// treatment in ModRM. Just avoid it.
+			continue;
+		}
+
 		bool mapped = false;
 		for (int rv = 0; rv < 32; ++rv) {
 			if (rvRegsToX86[rv].x86reg == r) {
