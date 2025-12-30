@@ -896,8 +896,12 @@ bool X86JIT::translate(PhysAddr entry)
 	lastHartPC = entry;
 	jumpsAway = false;
 
+	uint8_t *lastInstructionEnd;
+
 	for (;;)
 	{
+		lastInstructionEnd = codeRegionCurrent;
+
 		if (jumpsAway)
 			break;
 
@@ -929,6 +933,10 @@ bool X86JIT::translate(PhysAddr entry)
 
 		addr += 2;
 	}
+
+	// Partially translated instructions can mess up reg mapping
+	if (lastInstructionEnd != codeRegionCurrent)
+		panic("Failed instruction translation for %lx still emitted code!", addr);
 
 	// Did not translate any instructions
 	if (addr == entry)
