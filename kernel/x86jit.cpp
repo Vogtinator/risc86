@@ -592,6 +592,43 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 
 		emitMovRegReg(rs2X86, rdX86);
 		return true;
+	} else if ((inst & 0b111'1'11111'11111'11) == 0b100'1'00000'00000'10) { // c.ebreak
+		return false;
+	} else if ((inst & 0b111'1'00000'11111'11) == 0b100'1'00000'00000'10) { // c.jalr (after c.ebreak)
+		uint32_t rs1 = (inst >> 7u) & 0x1Fu;
+
+		// Prepare return address in %rax.
+		// %rax = current PC
+		emitUpdateHartPC(addr);
+		emitLoadPC(X86Reg::RAX);
+		// add $2, %rax
+		emitAddImmediate(X86Reg::RAX, 2);
+
+		// hart->pc = getReg(rs1)
+		X86Reg rs1X86 = mapRVRegForRead64(rs1);
+		emitStorePC(rs1X86);
+
+		jumpsAway = true;
+
+		// Write return address in %rax to x1.
+		X86Reg rdX86 = mapRVRegForWrite64(1);
+		emitMovRegReg(X86Reg::RAX, rdX86);
+
+		emitFlushRegsToHart();
+		emitRet(0);
+		return true;
+	} else if ((inst & 0b111'1'00000'00000'11) == 0b100'1'00000'00000'10) { // c.add (after c.jalr)
+		uint32_t rs2 = (inst >> 2) & 0x1F,
+		        rd  = (inst >> 7) & 0x1F;
+
+		X86Reg rs2X86 = mapRVRegForRead64(rs2),
+		       rdX86 = mapRVRegForReadWrite64(rd);
+
+		// add %rs2X86, %rdX86
+		emitREX(true, regREXBit(rs2X86), false, regREXBit(rdX86));
+		emit8(0x01);
+		emit8(0xC0 | (regLow3Bits(rs2X86) << 3) | regLow3Bits(rdX86));
+		return true;
 	}
 
 	return false;
