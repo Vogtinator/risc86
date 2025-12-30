@@ -29,6 +29,8 @@
  *   so that there's less flushing in early exit (cond jump, fault handle) paths?
  */
 
+X86JIT::X86JIT() {}
+
 void X86JIT::init()
 {
 	auto codeRegionPhys = physMemMgr.allocate(JIT_REGION_SIZE, MemRegionJIT);
@@ -40,7 +42,8 @@ void X86JIT::init()
 bool X86JIT::tryJit(Hart *hart, PhysAddr pcPhys)
 {
 	// Not already translated?
-	if (pcPhys != lastTranslationPCPhys) {
+	uint8_t *code;
+	if (!codeHashMap.lookup(pcPhys, &code)) {
 		// Make space for at least one translation
 		if (codeRegionEnd - codeRegionCurrent < MIN_TRANSLATION_SPACE) {
 			printf("JIT code region full, resetting.\n");
@@ -48,15 +51,14 @@ bool X86JIT::tryJit(Hart *hart, PhysAddr pcPhys)
 		}
 
 		// Try to make a translation
-		uint8_t *newCodeStart = codeRegionCurrent;
+		code = codeRegionCurrent;
 		if (!translate(pcPhys))
 			return false;
 
-		lastTranslationPCPhys = pcPhys;
-		lastTranslationCode = newCodeStart;
+		codeHashMap.insert(pcPhys, code);
 	}
 
-	uint32_t scause = jumpToCode(hart, lastTranslationCode);
+	uint32_t scause = jumpToCode(hart, code);
 
 	if (scause != 0) { // Fault?
 		// stval already set by the page fault handler
@@ -71,8 +73,7 @@ void X86JIT::reset()
 	codeRegionCurrent = codeRegionStart;
 
 	// Reset RV -> JIT code mappings
-	lastTranslationPCPhys = 0;
-	lastTranslationCode = nullptr;
+	codeHashMap.clear();
 }
 
 uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
@@ -1098,4 +1099,44 @@ bool X86JIT::translate(PhysAddr entry)
 	}
 
 	return true;
+}
+
+
+template<typename Key, typename Result, size_t numBuckets, size_t entriesPerBucket>
+void X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::insert(Key key, Result result)
+{
+	auto bucketNum = bucketForKey(key);
+	auto &bucket = buckets[bucketNum];
+	// TODO: Better strategy
+	if (bucket.numEntries == entriesPerBucket)
+		bucket.numEntries = 0;
+
+	bucket.entries[bucket.numEntries++] = { key, result };
+}
+
+template<typename Key, typename Result, size_t numBuckets, size_t entriesPerBucket>
+bool X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::lookup(Key key, Result *result)
+{
+	auto bucketNum = bucketForKey(key);
+	auto &bucket = buckets[bucketNum];
+	for (size_t i = 0; i < bucket.numEntries; ++i)
+		if (bucket.entries[i].key == key) {
+			*result = bucket.entries[i].result;
+			return true;
+		}
+
+	return false;
+}
+
+template<typename Key, typename Result, size_t numBuckets, size_t entriesPerBucket>
+void X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::clear()
+{
+	for (size_t i = 0; i < numBuckets; ++i)
+		buckets[i].numEntries = 0;
+}
+
+template<typename Key, typename Result, size_t numBuckets, size_t entriesPerBucket>
+size_t X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::bucketForKey(Key key)
+{
+	return (key >> 4) % numBuckets;
 }
