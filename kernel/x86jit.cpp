@@ -630,7 +630,61 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		emit8(0x01);
 		emit8(0xC0 | (regLow3Bits(rs2X86) << 3) | regLow3Bits(rdX86));
 		return true;
+	} else if ((inst & 0b111'000'000'00'000'11) == 0b011'000'000'00'000'00) { // c.ld
+		uint16_t imm53 = (inst >> 10) & 7,
+		        imm76 = (inst >>  5) & 3;
+
+		uint16_t off = (imm76 << 6) | (imm53 << 3);
+
+		uint32_t rs1 = ((inst >> 7) & 7) + 8,
+		        rd  = ((inst >> 2) & 7) + 8;
+
+		X86Reg rs1X86 = mapRVRegForRead64(rs1);
+
+		// %rdx = rs1
+		emitMovRegReg(rs1X86, X86Reg::RDX);
+		emitAddImmediate(X86Reg::RDX, off);
+
+		// clc
+		emit8(0xf8);
+
+		// mov (%rdx), %rax
+		emit8(0x48); emit8(0x8B); emit8(0x02);
+
+		emitLeaveOnMemFault(addr, Hart::SCAUSE_LOAD_PAGE_FAULT);
+
+		X86Reg rdX86 = mapRVRegForWrite64(rd);
+		emitMovRegReg(X86Reg::RAX, rdX86);
+		return true;
+	} else if ((inst & 0b111'000'000'00'000'11) == 0b111'000'000'00'000'00) { // c.sd
+		uint16_t imm53 = (inst >> 10) & 7,
+		        imm76 = (inst >>  5) & 3;
+
+		uint16_t off = (imm76 << 6) | (imm53 << 3);
+
+		uint32_t rs1 = ((inst >> 7) & 7) + 8,
+		        rs2 = ((inst >> 2) & 7) + 8;
+
+		X86Reg rs1X86 = mapRVRegForRead64(rs1),
+		       rs2X86 = mapRVRegForRead64(rs2);
+
+		// %rdx = rs1 + off
+		emitMovRegReg(rs1X86, X86Reg::RDX);
+		emitAddImmediate(X86Reg::RDX, off);
+
+		// %rax = rs2
+		emitMovRegReg(rs2X86, X86Reg::RAX);
+
+		// clc
+		emit8(0xf8);
+
+		// mov %rax, (%rdx)
+		emit8(0x48); emit8(0x89); emit8(0x02);
+
+		emitLeaveOnMemFault(addr, Hart::SCAUSE_STORE_PAGE_FAULT);
+		return true;
 	}
+
 
 	return false;
 }
