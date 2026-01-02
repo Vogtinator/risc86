@@ -47,7 +47,7 @@ private:
 		PT_NOEXEC     = 1ULL << 63,
 	} PageTableFlags;
 
-	size_t doOneMapping(uintptr_t phys, uintptr_t virt, uintptr_t size, uint64_t flags);
+	CALLED_FROM_IRQ size_t doOneMapping(uintptr_t phys, uintptr_t virt, uintptr_t size, uint64_t flags);
 
 	// PML4 tables. Switching between them to flush non-global TLB entries.
 	PhysAddr pml4p[2];

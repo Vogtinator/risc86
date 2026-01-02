@@ -35,7 +35,7 @@ TranslationResult mmu_translate(Hart *hart, uint64_t addr, AccessType type)
 		panic("Non-canonical address %016lx", addr);
 
 	// Set stval and return an invalid translation
-	auto fault = [&] () {
+	auto fault = [&] () CALLED_FROM_IRQ {
 		return TranslationResult { 0, 0 };
 	};
 
