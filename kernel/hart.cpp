@@ -533,7 +533,7 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 		break;
 	} case 0x180u:
 		if ((value >> 60) == 0 || (value >> 60) == 8) { // Only bare or Sv39
-			this->satp = value;
+			this->satp = value & ~(0xFFFFul << 44); // Mask off ASID
 			getPerCPU()->x86mmu.resetContext();
 		} else
 			panic("Unsupported SATP value %lx", value);
