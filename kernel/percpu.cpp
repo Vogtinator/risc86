@@ -29,7 +29,7 @@ __attribute__((no_caller_saved_registers))
 PerCpuState *getPerCPU()
 {
 	PerCpuState *ret;
-	asm volatile("mov %%fs:(0), %[ret]" : [ret] "=r" (ret));
+	asm ("mov %%fs:(0), %[ret]" : [ret] "=r" (ret));
 	return ret;
 }
 
