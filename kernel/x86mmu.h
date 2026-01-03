@@ -12,6 +12,8 @@ public:
 	static void initGlobal();
 	// Allocate structures and initialize current mapping.
 	void init();
+	// Configure MMU on the current CPU.
+	void initPerCPU();
 	// Remove all (non-global) guest mappings and switch to the new set.
 	CALLED_FROM_IRQ void resetContext();
 	// Add the RISC-V MMU mapping to the currently active page tables
