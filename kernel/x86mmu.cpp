@@ -139,6 +139,18 @@ void X86MMU::init()
 	}
 }
 
+void X86MMU::initPerCPU()
+{
+	// Enable the WriteProtect bit in %cr0 such that S-mode can't
+	// write into read-only user pages.
+	uint64_t cr0;
+	__asm volatile("mov %%cr0, %[cr0]\n" : [cr0] "=r" (cr0));
+	cr0 |= 1 << 16;
+	__asm volatile("mov %[cr0], %%cr0\n" :: [cr0] "r" (cr0));
+
+	resetContext();
+}
+
 // There is a lot of optimization potential here:
 // To avoid needless flushes of the whole context:
 // * Implement ASIDs, keep non-active mappings cached

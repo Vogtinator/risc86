@@ -80,7 +80,7 @@ void kernel_entry(KernelParams *params)
 
 		setupLAPICTimer();
 
-		getPerCPU()->x86mmu.resetContext();
+		getPerCPU()->x86mmu.initPerCPU();
 
 		auto *hart = &getPerCPU()->hart;
 
@@ -99,7 +99,7 @@ void kernel_entry(KernelParams *params)
 
 	setupSBI();
 
-	getPerCPU()->x86mmu.resetContext();
+	getPerCPU()->x86mmu.initPerCPU();
 
 	printf("Free mem: %lu MiB\n", physMemMgr.totalFreeBytes() / 1024 / 1024);
 
