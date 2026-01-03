@@ -87,6 +87,7 @@ private:
 	// State during generation of translations.
 	PhysAddr thisTranslationStartPC;
 	uint8_t *thisTranslationStartCode;
+	PhysAddr thisTranslationCurrentPC;
 
 	// Some instruction need the correct value of hart->pc.
 	// This stores the value hart->pc currently has, so that the needed diff can be applied.
@@ -108,9 +109,9 @@ private:
 	struct {
 		// gpr number. 0 (RAX is ever mapped) means not mapped.
 		X86Reg x86reg;
-		// If the mapping is in-use by the currently translated instruction.
-		// If set, it must not be freed.
-		bool inUse;
+		// The latest address that used this mapping.
+		// Must not be freed if it equals the currently translated one.
+		PhysAddr usedAtPC;
 		// If it has been written to and needs to be flushed.
 		bool dirty;
 		// Set if the lower 32 bits have been written to but not sign extended.

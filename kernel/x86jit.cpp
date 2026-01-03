@@ -16,10 +16,8 @@
 /* Ideas for further optimization:
  * - Relative jumps to the beginning of the current translation
  *   (loops) should stay inside the generated code
- * - Make emitAddImmediate with 0 a no-op
  * - Optimize findFreeDynReg by having an inverse map?
  * - Have the generated code push/pop clobbered dyn regs?
- * - Replace rvRegsToX86.inUse with generation counter?
  * - Only save/restore registers that are used by mappings?
  * - More special cases for reads from (0 immediate?) and writes to w0.
  *   (esp. jal?)
@@ -114,6 +112,9 @@ void X86JIT::emitMovImmediate32(X86Reg x86Reg, int32_t imm)
 
 void X86JIT::emitAddImmediate(X86Reg x86Reg, int32_t imm)
 {
+	if (imm == 0)
+		return;
+
 	if (imm >= INT8_MIN && imm <= INT8_MAX) {
 		// add $imm8, %rvReg
 		emitREX(true, false, false, regREXBit(x86Reg));
@@ -319,7 +320,7 @@ X86JIT::X86Reg X86JIT::findFreeDynReg()
 	// Nothing found - flush the first mapping not used by this instruction
 	for (int rv = 0; rv < 32; ++rv) {
 		if (rvRegsToX86[rv].x86reg == NotMapped
-		    || rvRegsToX86[rv].inUse)
+		    || rvRegsToX86[rv].usedAtPC == thisTranslationCurrentPC)
 			continue;
 
 		auto ret = rvRegsToX86[rv].x86reg;
@@ -350,7 +351,7 @@ X86JIT::X86Reg X86JIT::mapRVRegForRead(RVReg rvReg, bool bits32Ok)
 		mapEntry.bits32 = false;
 	}
 
-	mapEntry.inUse = true;
+	mapEntry.usedAtPC = thisTranslationCurrentPC;
 	return mapEntry.x86reg;
 }
 
@@ -373,7 +374,7 @@ X86JIT::X86Reg X86JIT::mapRVRegForWrite64(RVReg rvReg)
 
 	mapEntry.bits32 = false;
 	mapEntry.dirty = true;
-	mapEntry.inUse = true;
+	mapEntry.usedAtPC = thisTranslationCurrentPC;
 	return mapEntry.x86reg;
 }
 
@@ -386,7 +387,7 @@ X86JIT::X86Reg X86JIT::mapRVRegForWrite32(RVReg rvReg)
 
 	mapEntry.bits32 = true;
 	mapEntry.dirty = true;
-	mapEntry.inUse = true;
+	mapEntry.usedAtPC = thisTranslationCurrentPC;
 	return mapEntry.x86reg;
 }
 
@@ -417,7 +418,8 @@ void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
 	auto newPcPhys = pcPhys + imm;
 
 	// If it's not the beginning of this translation, just exit
-	if (newPcPhys != thisTranslationStartPC) {
+	// TODO: Remove true || once the TODO below is addressed.
+	if (true || newPcPhys != thisTranslationStartPC) {
 		emitRet(0);
 		return;
 	}
@@ -542,7 +544,7 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 
 		emitLeaveOnMemFault(addr, Hart::SCAUSE_STORE_PAGE_FAULT);
 		return true;
-	}  else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'10) { // c.ldsp
+	} else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'10) { // c.ldsp
 		uint16_t imm5  = (inst >> 12) & 1,
 		        imm43 = (inst >>  5) & 3,
 		        imm86 = (inst >>  2) & 7;
@@ -684,7 +686,6 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		emitLeaveOnMemFault(addr, Hart::SCAUSE_STORE_PAGE_FAULT);
 		return true;
 	}
-
 
 	return false;
 }
@@ -1077,11 +1078,6 @@ bool X86JIT::translate(PhysAddr entry)
 	PhysAddr addr = entry;
 
 	// Fresh translation, reset state.
-
-	// Reset register mappings
-	for (int i = 0; i < 32; ++i)
-		rvRegsToX86[i] = {};
-
 	thisTranslationStartPC = entry;
 	thisTranslationStartCode = codeRegionCurrent;
 	lastHartPC = entry;
@@ -1091,6 +1087,7 @@ bool X86JIT::translate(PhysAddr entry)
 
 	for (;;)
 	{
+		thisTranslationCurrentPC = addr;
 		lastInstructionEnd = codeRegionCurrent;
 
 		if (jumpsAway)
@@ -1099,15 +1096,8 @@ bool X86JIT::translate(PhysAddr entry)
 		if ((entry ^ addr) >> 12)
 			break; // Crossed a page boundary?
 
-		if ((addr & 0xFFF) > 0xFFE)
-			break; // Can't cross a page boundary.
-
 		if (codeRegionEnd - codeRegionCurrent < MIN_TRANSLATION_SPACE)
 			break;
-
-		// No regs in use by the next instruction yet
-		for (int i = 0; i < 32; ++i)
-			rvRegsToX86[i].inUse = false;
 
 		uint16_t inst16 = *phys_to_virt<uint16_t>(addr);
 		if ((inst16 & 0b11) == 0b11) { // 32bit instruction?
@@ -1142,6 +1132,9 @@ bool X86JIT::translate(PhysAddr entry)
 		emitFlushRegsToHart();
 		emitRet(0);
 	}
+
+	// Reset register mappings
+	__builtin_memset(rvRegsToX86, 0, sizeof(rvRegsToX86));
 
 	return true;
 }
