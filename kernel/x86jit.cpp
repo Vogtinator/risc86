@@ -1096,6 +1096,9 @@ bool X86JIT::translate(PhysAddr entry)
 		if (jumpsAway)
 			break;
 
+		if ((entry ^ addr) >> 12)
+			break; // Crossed a page boundary?
+
 		if ((addr & 0xFFF) > 0xFFE)
 			break; // Can't cross a page boundary.
 
