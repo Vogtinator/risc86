@@ -823,34 +823,22 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			emitRaw<int8_t>(rawimm & 63u);
 
 			return true;
-		} case 0x2u: // slti
+		}
+		case 0x2u: // slti
+		case 0x3u: // sltiu
 			// cmp imm32, %rs1X86
 			emitREX(true, false, false, regREXBit(rs1X86));
 			emit8(0x81);
 			emit8(0xC0 | (7 << 3) | regLow3Bits(rs1X86));
 			emitRaw<int32_t>(imm);
 
-			// setl %al
-			emit8(0x0F); emit8(0x9C); emit8(0xC0);
-
-			// movzsx %al, %rdX86
-			emitREX(true, regREXBit(rdX86), false, false);
-			emit8(0x0F); emit8(0xB6);
-			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
-
-			return true;
-		case 0x3u: // sltiu
-			// mov $imm, %eax
-			emit8(0xb8);
-			emitRaw<uint32_t>(rawimm);
-
-			// cmp %rax, %rs1X86
-			emitREX(true, regREXBit(X86Reg::RAX), false, regREXBit(rs1X86));
-			emit8(0x39);
-			emit8(0xC0 | (regLow3Bits(X86Reg::RAX) << 3) | regLow3Bits(rs1X86));
-
-			// setb %al
-			emit8(0x0F); emit8(0x92); emit8(0xC0);
+			if (funct3 == 0x2) { // slti
+				// setl %al
+				emit8(0x0F); emit8(0x9C); emit8(0xC0);
+			} else { // sltiu
+				// setb %al
+				emit8(0x0F); emit8(0x92); emit8(0xC0);
+			}
 
 			// movzsx %al, %rdX86
 			emitREX(true, regREXBit(rdX86), false, false);
