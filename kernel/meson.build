@@ -1,9 +1,5 @@
 c_args = ['-ffreestanding', '-nostdlib']
 
-# This could be avoided by having a separate stack for interrupts,
-# (while avoiding recursive ones), but that's annoying to set up (TSS etc.)
-c_args += ['-mno-red-zone']
-
 c_args += ['-DUACPI_BAREBONES_MODE']
 
 cpp_args = c_args + ['-fno-exceptions', '-fno-rtti']

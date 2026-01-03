@@ -89,7 +89,7 @@ struct IDTEntry {
 	explicit IDTEntry (HandlerType handler) :
 	    offset_low(uintptr_t(handler)),
 	    cs(SegmentKernelCS),
-	    ist(0),
+	    ist(1),
 	    flags(0b11101110), // Catch-all: Present interrupt gate accessible to Ring 3
 	    offset_mid(uintptr_t(handler) >> 16),
 	    offset_high(uintptr_t(handler) >> 32),
@@ -245,9 +245,10 @@ void setupGDT(unsigned int cpuNum)
 {
 	gdt[cpuNum] = gdtTemplate;
 
-	// Create the TSS for this CPU: Only needs rsp[0] set for interrupt handling.
+	// Create the TSS for this CPU: Set rsp[0] and ist1 (ist[0]) for interrupt handling.
 	// Use lowest 16KiB of the main stack for this CPU.
 	tss[cpuNum].rsp[0] = KERNEL_STACK_LOW + (cpuNum * KERNEL_STACK_CPU_OFFSET) + 16 * 1024;
+	tss[cpuNum].ist[0] = tss[cpuNum].rsp[0];
 	tss[cpuNum].iobpPtr = sizeof(tss[cpuNum]);
 
 	// Set the TSS segment descriptor in the GDT
