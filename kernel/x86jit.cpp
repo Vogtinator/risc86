@@ -694,6 +694,45 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 
 		emitLeaveOnMemFault(addr, Hart::SCAUSE_STORE_PAGE_FAULT);
 		return true;
+	} else if ((inst & 0b110'000'000'00000'11) == 0b110'000'000'00000'01) { // c.beqz/c.bnez
+		bool branchIfNotZero = inst & (1 << 13);
+		uint16_t imm8  = (inst >> 12) & 1,
+		        imm43 = (inst >> 10) & 3,
+		        imm76 = (inst >>  5) & 3,
+		        imm21 = (inst >>  3) & 3,
+		        imm5  = (inst >>  2) & 1;
+
+		uint16_t uimm = (imm8 << 8) | (imm76 << 6) | (imm5 << 5) | (imm43 << 3)
+		                | (imm21 << 1);
+
+		int16_t imm = int16_t(uimm << 7) >> 7;
+
+		uint32_t rs1 = ((inst >> 7) & 7) + 8;
+
+		X86Reg rs1X86 = mapRVRegForRead64(rs1);
+
+		// test %rs1X86, %rs1X86
+		emitREX(true, regREXBit(rs1X86), false, regREXBit(rs1X86));
+		emit8(0x85);
+		emit8(0xC0 | (regLow3Bits(rs1X86) << 3) | regLow3Bits(rs1X86));
+
+		// If comparison false, skip the jump away
+		if (branchIfNotZero)
+			emit8(0x74); // jz off8
+		else
+			emit8(0x75); // jnz off8
+
+		uint8_t *jmpOffPtr = codeRegionCurrent;
+		emit8(0); // off8 for jmp, will be adjusted below
+
+		emitPCRelativeJump(addr, imm);
+
+		int jmpOff = codeRegionCurrent - jmpOffPtr - 1;
+		if (jmpOff < 0 || jmpOff >= INT8_MAX)
+			panic("jmp offset too big");
+
+		*jmpOffPtr = int8_t(jmpOff);
+		return true;
 	}
 
 	return false;
