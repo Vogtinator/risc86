@@ -25,6 +25,8 @@
  * - Pad new translations so that that don't invalidate old ones in the i$?
  * - More eager flushing of dirty regs also in the hot path,
  *   so that there's less flushing in early exit (cond jump, fault handle) paths?
+ * - Track if clc is neccessary
+ * - Have %rdi point to hart->regs[16] to make use of negative displacement ($-imm(%rdi))
  */
 
 X86JIT::X86JIT() {}
@@ -142,6 +144,9 @@ void X86JIT::emitAddImmediate(X86Reg x86Reg, int32_t imm)
 
 void X86JIT::emitMovRegReg(X86Reg from, X86Reg to)
 {
+	if (from == to)
+		return;
+
 	// mov %from, %to
 	emitREX(true, regREXBit(from), false, regREXBit(to));
 	emit8(0x89);
@@ -990,6 +995,133 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 
 		emitLeaveOnMemFault(addr, Hart::SCAUSE_STORE_PAGE_FAULT);
 		return true;
+	}
+	case 0x33u: // integer register
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		uint32_t funct7 = inst >> 25u;
+
+		uint32_t subOp = (funct7 << 4u) | funct3;
+		if (subOp == 0x012
+		    || subOp == 0x014 || subOp == 0x015 || subOp == 0x016 || subOp == 0x017)
+			return false;
+
+		X86Reg rs1X86 = mapRVRegForRead64(rs1),
+		       rs2X86 = mapRVRegForRead64(rs2),
+		       rdX86 = mapRVRegForWrite64(rd);
+
+		switch(subOp)
+		{
+		case 0x000u: // add
+			// lea (%rs1X86, %rs2X86), %rdX86 would be nice, but r12 and r13 are both special,
+			// so do it like the other operations.
+		case 0x200u: // sub
+		case 0x004u: // xor
+		case 0x006u: // or
+		case 0x007u: // and
+			// %rax = %rs1X86
+			emitMovRegReg(rs1X86, X86Reg::RAX);
+			uint8_t x86Op;
+			if (subOp == 0x000) // add
+				x86Op = 0x01; // add
+			else if (subOp == 0x200) // sub
+				x86Op = 0x29; // sub
+			else if (subOp == 0x004) // xor
+				x86Op = 0x31; // xor
+			else if (subOp == 0x006) // or
+				x86Op = 0x09; // or
+			else if (subOp == 0x007) // and
+				x86Op = 0x21; // and
+			else
+				panic("Op not supported");
+
+			// $opc %rs2X86, %rax
+			emitREX(true, regREXBit(rs2X86), false, regREXBit(X86Reg::RAX));
+			emit8(x86Op);
+			emit8(0xC0 | (regLow3Bits(rs2X86) << 3) | regLow3Bits(X86Reg::RAX));
+
+			// %rdX86 = %rax
+			emitMovRegReg(X86Reg::RAX, rdX86);
+			return true;
+		case 0x001u: // sll
+		case 0x005u: // srl
+		case 0x205u: // sra
+			// %rcx = %rs2X86
+			emitMovRegReg(rs2X86, X86Reg::RCX);
+			// and %63, %cl
+			emit8(0x80); emit8(0xe1); emit8(0x3f);
+
+			uint8_t shiftSubOp;
+			if (subOp == 0x001) // sll
+				shiftSubOp = 4; // shl
+			else if (subOp == 0x005) // srl
+				shiftSubOp = 5; // shr
+			else if (subOp == 0x205) // sra
+				shiftSubOp = 7; // sar
+			else
+				panic("Shift not supported");
+
+			// %rdX86 = %rs1X86
+			emitMovRegReg(rs1X86, rdX86);
+			// $shiftSubOp %cl, %rdX86
+			emitREX(true, false, false, regREXBit(rdX86));
+			emit8(0xD3);
+			emit8(0xC0 | (shiftSubOp << 3) | regLow3Bits(rdX86));
+
+			return true;
+		case 0x002u: // slt
+		case 0x003u: // sltu
+			// cmp %rs2X86, %rs1X86
+			emitREX(true, regREXBit(rs2X86), false, regREXBit(rs1X86));
+			emit8(0x39);
+			emit8(0xC0 | (regLow3Bits(rs2X86) << 3) | regLow3Bits(rs1X86));
+
+			if (subOp == 0x002) { // slt
+				// setl %al
+				emit8(0x0F); emit8(0x9C); emit8(0xC0);
+			} else { // sltu
+				// setb %al
+				emit8(0x0F); emit8(0x92); emit8(0xC0);
+			}
+
+			// movzsx %al, %rdX86
+			emitREX(true, regREXBit(rdX86), false, false);
+			emit8(0x0F); emit8(0xB6);
+			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
+
+			return true;
+		case 0x010u: // mul
+		case 0x011u: // mulh
+		// case 0x012u: // mulhsu not implemented
+		case 0x013u: // mulhu
+		{
+			bool isUnsigned = subOp == 0x013, // mulhu
+			     isHigher = subOp != 0x010; // !mul
+
+			// %rax = %rs1X86
+			emitMovRegReg(rs1X86, X86Reg::RAX);
+
+			// (i)mul %rs2X86
+			emitREX(true, false, false, regREXBit(rs2X86));
+			emit8(0xF7);
+			emit8(0xC0 | ((isUnsigned ? 4 : 5) << 3) | regLow3Bits(rs2X86));
+
+			emitMovRegReg(isHigher ? X86Reg::RDX : X86Reg::RAX, rdX86);
+			return true;
+		}
+		/* Division not implmented
+		case 0x014u: // div
+		case 0x015u: // divu
+		case 0x016u: // rem
+		case 0x017u: // remu
+		*/
+		default:
+			panic("Unknown reg-reg instruction");
+		}
+		break;
 	}
 	case 0x37u: // lui
 	{
