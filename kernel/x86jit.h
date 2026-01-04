@@ -45,7 +45,10 @@ private:
 	using RVReg = uint8_t;
 
 	void emitREX(bool w, bool r, bool x, bool b);
-	void emitMovImmediate32(X86Reg x86Reg, int32_t imm);
+	// Zero-extended to the 64bit register
+	void emitMovImmediate32(X86Reg x86Reg, uint32_t imm);
+	// Sign-extended to the 64bit register
+	void emitMovImmediate64(X86Reg x86Reg, int32_t imm);
 	void emitAddImmediate(X86Reg x86Reg, int32_t imm);
 	void emitMovRegReg(X86Reg from, X86Reg to);
 	void emitXorRegReg(X86Reg x86Reg);
