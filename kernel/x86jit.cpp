@@ -102,11 +102,20 @@ void X86JIT::emitREX(bool w, bool r, bool x, bool b)
 	emit8(rex);
 }
 
-void X86JIT::emitMovImmediate32(X86Reg x86Reg, int32_t imm)
+void X86JIT::emitMovImmediate32(X86Reg x86Reg, uint32_t imm)
 {
-	// mov $imm32, %x86Reg
+	// movl $imm32, %x86Reg
 	emitREX(false, false, false, regREXBit(x86Reg));
 	emit8(0xB8 | regLow3Bits(x86Reg));
+	emitRaw<uint32_t>(imm);
+}
+
+void X86JIT::emitMovImmediate64(X86Reg x86Reg, int32_t imm)
+{
+	// movq $imm32, %x86Reg
+	emitREX(true, false, false, regREXBit(x86Reg));
+	emit8(0xC7);
+	emit8(0xC0 | regLow3Bits(x86Reg));
 	emitRaw<int32_t>(imm);
 }
 
@@ -503,8 +512,8 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
 		uint32_t rd = (inst >> 7) & 0x1F;
 
-		X86Reg rdX86 = mapRVRegForWrite32(rd);
-		emitMovImmediate32(rdX86, imm);
+		X86Reg rdX86 = mapRVRegForWrite64(rd);
+		emitMovImmediate64(rdX86, imm);
 		return true;
 	} else if ((inst & 0b111'0'11111'00000'11) == 0b000'0'00000'00000'01) { // c.nop (before c.addi)
 		// nop
@@ -948,8 +957,8 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		uint32_t rd = (inst >> 7u) & 0x1Fu;
 		int32_t imm = int32_t(inst & 0xFFFFF000u);
 
-		X86Reg rdX86 = mapRVRegForWrite32(rd);
-		emitMovImmediate32(rdX86, imm);
+		X86Reg rdX86 = mapRVRegForWrite64(rd);
+		emitMovImmediate64(rdX86, imm);
 		return true;
 	}
 	case 0x63u: // branch
