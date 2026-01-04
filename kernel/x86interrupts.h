@@ -8,10 +8,14 @@
 // This should be __attribute__((no_caller_saved_registers)), but this triggers some LLVM bugs:
 // With -O0: https://github.com/llvm/llvm-project/issues/173800
 // Without LTO: functions that return structs clobber %rax which the callers don't expect.
-// Use __attribute__((target("general-regs-only"))) instead and require -O1
+// Use __attribute__((target("general-regs-only"))) instead and require -O1.
+// Unfortunately clang thinks ^ is not enough and warns, so ignore the warning.
 #define CALLED_FROM_IRQ __attribute__((target("general-regs-only")))
 #if defined(__clang__) && !defined(__OPTIMIZE__)
 #error Must turn on optimizations to avoid clang bugs
+#endif
+#if defined(__clang__)
+#pragma GCC diagnostic ignored "-Wexcessive-regsave"
 #endif
 
 // Frame as pushed by the CPU and passed to
