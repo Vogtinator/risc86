@@ -7,6 +7,8 @@
 /* How the JIT works:
  * In JIT generated code, %rdi points to the current struct Hart,
  * which is used to load/store registers and PC.
+ * %rdi has an offset to regs[16], so that all 32 registers can be
+ * addressed with an 8-bit signed displacement.
  * r8-r15 are dynamically allocated and are used for hart register state.
  * The PC is not updated for each instruction but only on demand.
  * The generated code returns with a status code in $eax, that is either
@@ -25,7 +27,6 @@
  * - More eager flushing of dirty regs also in the hot path,
  *   so that there's less flushing in early exit (cond jump, fault handle) paths?
  * - Track if clc is neccessary
- * - Have %rdi point to hart->regs[16] to make use of negative displacement ($-imm(%rdi))
  */
 
 X86JIT::X86JIT() {}
@@ -80,10 +81,10 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	uint32_t ret;
 	asm("call %A[code]"
 	    : "=a" (ret)
-	    : [code] "r" (code), "D" (hart)
+	    : [code] "r" (code), "D" (uintptr_t(hart) + hartPtrBias)
 	    : "memory", "cc",
 	      "rcx", "rdx", "rbx",
-	      "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15");
+	      "r8", "r9", "r10", "r11", /*"r12",*/ "r13", "r14", "r15");
 
 	return ret;
 }
@@ -176,7 +177,7 @@ void X86JIT::emitLoadRVReg(RVReg rvReg, X86Reg x86Reg)
 		return;
 	}
 
-	int32_t off = offsetof(Hart, regs[rvReg]);
+	int32_t off = offsetof(Hart, regs[rvReg]) - hartPtrBias;
 	if (int8_t(off) == off) {
 		// mov off8(%rdi), %x86reg
 		emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
@@ -199,7 +200,7 @@ void X86JIT::emitLoadPC(X86Reg x86Reg)
 	emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
 	emit8(0x8B);
 	emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(offsetof(Hart, pc));
+	emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
 }
 
 void X86JIT::emitStorePC(X86Reg x86Reg)
@@ -208,7 +209,7 @@ void X86JIT::emitStorePC(X86Reg x86Reg)
 	emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
 	emit8(0x89);
 	emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(offsetof(Hart, pc));
+	emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
 }
 
 void X86JIT::emitAddPC(int32_t value)
@@ -221,7 +222,7 @@ void X86JIT::emitAddPC(int32_t value)
 		emitREX(true, false, false, regREXBit(hartPtrReg));
 		emit8(0x83);
 		emit8(0x80 | regLow3Bits(hartPtrReg));
-		emitRaw<int32_t>(offsetof(Hart, pc));
+		emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
 		emitRaw<int8_t>(value);
 		return;
 	}
@@ -230,7 +231,7 @@ void X86JIT::emitAddPC(int32_t value)
 	emitREX(true, false, false, regREXBit(hartPtrReg));
 	emit8(0x81);
 	emit8(0x80 | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(offsetof(Hart, pc));
+	emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
 	emitRaw<int32_t>(value);
 }
 
@@ -251,7 +252,7 @@ void X86JIT::emitStoreRVReg64(X86Reg x86Reg, RVReg rvReg)
 	if (rvReg == 0)
 		panic("Attempted to write to x0");
 
-	int32_t off = offsetof(Hart, regs[rvReg]);
+	int32_t off = offsetof(Hart, regs[rvReg]) - hartPtrBias;
 	if (int8_t(off) == off) {
 		// mov %x86reg, off8(%rdi)
 		emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
@@ -443,7 +444,7 @@ void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
 		// cmpb $0, off32(%rdi)
 		static_assert(!regREXBit(hartPtrReg));
 		emit8(0x80); emit8(0xB8 | regLow3Bits(hartPtrReg));
-		emitRaw<int32_t>(offsetof(Hart, irqPending));
+		emitRaw<int32_t>(offsetof(Hart, irqPending) - hartPtrBias);
 		emit8(0x00);
 
 		// Otherwise, loop back to the start!
