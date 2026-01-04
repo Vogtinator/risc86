@@ -56,6 +56,7 @@ private:
 
 	// Low-level helpers for RV register management
 	static const X86Reg hartPtrReg = X86Reg::RDI;
+	static const size_t hartPtrBias = offsetof(Hart, regs[16]);
 	void emitLoadRVReg(RVReg rvReg, X86Reg x86Reg);
 	void emitLoadPC(X86Reg x86Reg);
 	void emitStorePC(X86Reg x86Reg);
