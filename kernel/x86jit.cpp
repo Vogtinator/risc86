@@ -520,6 +520,50 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		X86Reg rdX86 = mapRVRegForWrite64(rd);
 		emitMovImmediate64(rdX86, imm);
 		return true;
+	} else if ((inst & 0xEF83) == 0x6101) { // c.addi16sp (must come before c.lui)
+		uint16_t imm9  = (inst >> 12) & 1,
+		        imm4  = (inst >>  6) & 1,
+		        imm6  = (inst >>  5) & 1,
+		        imm87 = (inst >>  3) & 3,
+		        imm5  = (inst >>  2) & 1;
+
+		uint16_t uimm = (imm9 << 9) | (imm87 << 7) | (imm6 << 6)
+		                | (imm5 << 5) | (imm4 << 4);
+
+		int16_t imm = int16_t(uimm << 6) >> 6;
+
+		X86Reg spX86 = mapRVRegForReadWrite64(2);
+		emitAddImmediate(spX86, imm);
+		return true;
+	} else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'01) { // c.lui (after c.addi16sp)
+		uint16_t imm17   = (inst >> 12) & 1,
+		        imm1612 = (inst >>  2) & 0x1F;
+
+		int32_t imm = int32_t(((imm17 << 17) | (imm1612 << 12)) << 14) >> 14;
+		uint32_t rd = (inst >> 7) & 0x1F;
+
+		X86Reg rdX86 = mapRVRegForWrite64(rd);
+		emitMovImmediate64(rdX86, imm);
+		return true;
+	} else if (inst == 0) { // Illegal (before c.addi4spn)
+		return false;
+	} else if ((inst & 0b111'00000000'000'11) == 0b000'00000000'000'00) { // c.addi4spn (after illegal)
+		uint16_t imm54 = (inst >> 11) & 3,
+		        imm96 = (inst >>  7) & 0xF,
+		        imm2  = (inst >>  6) & 1,
+		        imm3  = (inst >>  5) & 1;
+
+		uint16_t uimm = (imm96 << 6) | (imm54 << 4) | (imm3 << 3)
+		                | (imm2 << 2);
+
+		uint32_t rd = ((inst >> 2) & 7) + 8;
+
+		X86Reg spX86 = mapRVRegForRead64(2),
+		       rdX86 = mapRVRegForWrite64(rd);
+
+		emitMovRegReg(spX86, rdX86);
+		emitAddImmediate(rdX86, uimm);
+		return true;
 	} else if ((inst & 0b111'0'11111'00000'11) == 0b000'0'00000'00000'01) { // c.nop (before c.addi)
 		// nop
 		return true;
