@@ -222,8 +222,11 @@ EFI_STATUS loadKernelAndInitrd(EFI_HANDLE ImageHandle)
 		return Status;
 
 	Status = openFileInVolume(Volume, L"initrd", &InitrdFile, &InitrdSize);
-	if (EFI_ERROR(Status))
-		return Status;
+	if (EFI_ERROR(Status)) {
+		ST->ConOut->OutputString(ST->ConOut, L"Initrd not found, ignoring\r\n");
+		InitrdFile = NULL;
+		InitrdSize = 0;
+	}
 
 	// Alloate memory region for initrd + kernel
 	// Add worst case padding for 2MiB kernel alignment.
@@ -243,14 +246,18 @@ EFI_STATUS loadKernelAndInitrd(EFI_HANDLE ImageHandle)
 	if (EFI_ERROR(Status) || ActuallyRead != KernelSize)
 		return Status;
 
-	// Load initrd into memory
-	ActuallyRead = InitrdSize;
-	Status = InitrdFile->Read(InitrdFile, &ActuallyRead, (void*)(params.initrd_phys));
-	if (EFI_ERROR(Status) || ActuallyRead != InitrdSize)
-		return Status;
+	if (InitrdFile) {
+		// Load initrd into memory
+		ActuallyRead = InitrdSize;
+		Status = InitrdFile->Read(InitrdFile, &ActuallyRead, (void*)(params.initrd_phys));
+		if (EFI_ERROR(Status) || ActuallyRead != InitrdSize)
+			return Status;
+	}
 
 	// Close all handles again
-	InitrdFile->Close(InitrdFile);
+	if (InitrdFile)
+		InitrdFile->Close(InitrdFile);
+
 	KernelFile->Close(KernelFile);
 	Volume->Close(Volume);
 
