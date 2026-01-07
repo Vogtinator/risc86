@@ -431,30 +431,35 @@ void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
 	// Calculate the new PC
 	auto newPcPhys = pcPhys + imm;
 
-	// If it's not the beginning of this translation, just exit
-	// TODO: Remove true || once the TODO below is addressed.
-	if (true || newPcPhys != thisTranslationStartPC) {
-		emitRet(0);
-		return;
+	// If it's the beginning of this translation, loop back to the start
+	if (newPcPhys == thisTranslationStartPC) {
+		// Check if there's an interrupt
+		// cmpb $0, off32(%rdi)
+		static_assert(!regREXBit(hartPtrReg));
+		emit8(0x80); emit8(0xB8 | regLow3Bits(hartPtrReg));
+		emitRaw<int32_t>(offsetof(Hart, irqPending));
+		emit8(0x00);
+
+		// Otherwise, loop back to the start!
+		int32_t jmpOff = thisTranslationStartCode - codeRegionCurrent;
+
+		// Short jump?
+		int32_t jmpOffShort = jmpOff - 2;
+		if (jmpOffShort >= INT8_MIN && jmpOffShort <= INT8_MAX) {
+			// je off8
+			emit8(0x74);
+			//emitRaw<int8_t>(jmpOffShort);
+			emit8(0);
+		} else {
+			int32_t jmpOffNear = jmpOff - 6;
+			// je off32
+			emit8(0x0F); emit8(0x84);
+			//emitRaw<int32_t>(jmpOffNear);
+			emitRaw<int32_t>(0);
+		}
 	}
 
-	// Otherwise, loop back to the start!
-	int32_t jmpOff = thisTranslationStartCode - codeRegionCurrent;
-	// TODO: ret in case there's an interrupt
-
-	// Short jump?
-	int32_t jmpOffShort = jmpOff - 2;
-	if (jmpOffShort >= INT8_MIN && jmpOffShort <= INT8_MAX) {
-		// jmp off8
-		emit8(0xEB);
-		emitRaw<int8_t>(jmpOffShort);
-		return;
-	}
-
-	int32_t jmpOffNear = jmpOff - 5;
-	// jmp off32
-	emit8(0xE9);
-	emitRaw<int32_t>(jmpOffNear);
+	emitRet(0);
 }
 
 void X86JIT::emitLeaveOnMemFault(PhysAddr curPC, uint32_t scause)
