@@ -40,6 +40,7 @@ static void irqHandler(InterruptFrame *frame, int irq)
 			panic("Unexpected IRQ %d", irq);
 
 		hart->eip_64[rvExtIRQ / 64] |= 1ul << (rvExtIRQ % 64);
+		hart->irqPending = true;
 		// TODO: EOI should only be sent in markRVExtInterruptHandled(),
 		// but interrupts are enabled so by then another higher prio IRQ might've taken over
 		// and the EOI acks the wrong one.

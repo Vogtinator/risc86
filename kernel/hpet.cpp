@@ -106,6 +106,7 @@ static void lapicIRQHandler(InterruptFrame *frame)
 	(void) frame;
 	auto *hart = &getPerCPU()->hart;
 	hart->sip |= SIP_STIP;
+	hart->irqPending = true;
 	lapicWrite(0xB0, 0x00);
 }
 

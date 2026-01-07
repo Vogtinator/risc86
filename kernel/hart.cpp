@@ -71,6 +71,8 @@ void Hart::handleSRET()
 
 void Hart::handlePendingInterrupts()
 {
+	this->irqPending = false;
+
 	// IMSIC external interrupts
 	int extInt = 0;
 	// Find lowest pending external interrupt
@@ -1963,11 +1965,9 @@ void Hart::runInstruction(uint32_t inst)
 void Hart::run()
 {
 	applyFRM();
-	uint32_t counter = 0;
-
 	for(;;)
 	{
-		if ((counter++ % 1024) == 0)
+		if (this->irqPending)
 			this->handlePendingInterrupts();
 
 		// Fetch 16 bits at a time. Due to IALIGN=16, a 32-bit wide instruction

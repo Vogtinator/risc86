@@ -81,6 +81,8 @@ struct Hart {
 	_Atomic uint64_t eip_64[2]; // Written by this CPU's IRQ handlers
 	uint64_t eie_64[2]; // 64 bits, so there is no eip1, eip3, ...
 
+	_Atomic bool irqPending; // Set by this CPU's IRQ handlers
+
 	// The _Atomic variables here are written by other CPUs
 	// Same values as SBI HSM states
 	_Atomic enum class State {
