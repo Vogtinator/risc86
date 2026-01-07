@@ -39,8 +39,8 @@ private:
 		RAX=0, RCX, RDX, RBX, RSP, RBP, RSI, RDI,
 		R8, R9, R10, R11, R12, R13, R14, R15,
 	};
-	inline bool regREXBit(X86Reg r) { return static_cast<uint8_t>(r) & 0b1000; }
-	inline uint8_t regLow3Bits(X86Reg r) { return static_cast<uint8_t>(r) & 0b0111; }
+	static inline constexpr bool regREXBit(X86Reg r) { return static_cast<uint8_t>(r) & 0b1000; }
+	static inline uint8_t regLow3Bits(X86Reg r) { return static_cast<uint8_t>(r) & 0b0111; }
 
 	using RVReg = uint8_t;
 
@@ -55,7 +55,7 @@ private:
 	void emitCliHlt(); // For debugging
 
 	// Low-level helpers for RV register management
-	const X86Reg hartPtrReg = X86Reg::RDI;
+	static const X86Reg hartPtrReg = X86Reg::RDI;
 	void emitLoadRVReg(RVReg rvReg, X86Reg x86Reg);
 	void emitLoadPC(X86Reg x86Reg);
 	void emitStorePC(X86Reg x86Reg);
