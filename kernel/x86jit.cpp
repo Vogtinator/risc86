@@ -14,8 +14,7 @@
  */
 
 /* Ideas for further optimization:
- * - Relative jumps to the beginning of the current translation
- *   (loops) should stay inside the generated code
+ * - Also try to direct jump to the next instruction when leaving the page?
  * - Optimize findFreeDynReg by having an inverse map?
  * - Have the generated code push/pop clobbered dyn regs?
  * - Only save/restore registers that are used by mappings?
@@ -430,9 +429,16 @@ void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
 
 	// Calculate the new PC
 	auto newPcPhys = pcPhys + imm;
+	uint8_t *jumpDestination = nullptr;
+
+	// Target already JIT translated?
+	if (newPcPhys == thisTranslationStartPC)
+		jumpDestination = thisTranslationStartCode;
+	else if (!codeHashMap.lookup(newPcPhys, &jumpDestination))
+		jumpDestination = nullptr;
 
 	// If it's the beginning of this translation, loop back to the start
-	if (newPcPhys == thisTranslationStartPC) {
+	if (jumpDestination != nullptr) {
 		// Check if there's an interrupt
 		// cmpb $0, off32(%rdi)
 		static_assert(!regREXBit(hartPtrReg));
