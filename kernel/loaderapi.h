@@ -3,7 +3,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MAX_CPUS 16
+// Each possible core allocates X86JIT::JIT_REGION_SIZE B (128MB ATM),
+// which can be substantial. Can be raised once that's done for online
+// CPUs only.
+#define MAX_CPUS 6
 
 // Define the virtual memory layout
 static const uint64_t

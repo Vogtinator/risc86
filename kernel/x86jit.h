@@ -17,7 +17,7 @@ public:
 	// Discard all translations.
 	void reset();
 private:
-	const size_t JIT_REGION_SIZE = 8*1024*1024; // 8 MiB
+	const size_t JIT_REGION_SIZE = 128*1024*1024; // 128 MiB
 	const int MIN_TRANSLATION_SPACE = 256;
 
 	__attribute__((warn_unused_result))
@@ -144,5 +144,5 @@ private:
 		} buckets[numBuckets];
 	};
 
-	CodeHashMap<PhysAddr, uint8_t*, 64, 64> codeHashMap;
+	CodeHashMap<PhysAddr, uint8_t*, 1<<16, 2> codeHashMap;
 };
