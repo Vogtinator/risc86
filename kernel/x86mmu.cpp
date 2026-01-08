@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "x86mmu.h"
 #include "percpu.h"
@@ -190,6 +191,8 @@ void X86MMU::addRVMapping(uint64_t virtAddr, TranslationResult *rvMap)
 		size -= mappedSize;
 		if (mappedSize == 0) {
 			// On allocation failure, flush everything and try again.
+			const char msg[] = "X86MMU: No physical pages left, flushing all\n";
+			write(2, msg, sizeof(msg) - 1);
 			resetContext();
 			return addRVMapping(virtAddr, rvMap);
 		}
