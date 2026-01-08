@@ -1993,18 +1993,25 @@ void Hart::run()
 {
 	applyFRM();
 	auto *jit = &getPerCPU()->x86jit;
+	uint64_t lastPC = 0;
 	for(;;)
 	{
 		if (this->irqPending)
 			this->handlePendingInterrupts();
 
 #if !NO_JIT
-		PhysAddr pcPhys;
-		if (!fetchInstructionPhys(&pcPhys, this->pc))
-			continue;
+		int64_t pcDiff = this->pc - lastPC;
+		lastPC = this->pc;
+		if (pcDiff <= 0 || pcDiff > 4) {
+			PhysAddr pcPhys;
+			if (!fetchInstructionPhys(&pcPhys, this->pc))
+				continue;
 
-		if (jit->tryJit(this, pcPhys))
-			continue;
+			if (jit->tryJit(this, pcPhys)) {
+				lastPC = this->pc;
+				continue;
+			}
+		}
 #endif
 
 		// Fetch 16 bits at a time. Due to IALIGN=16, a 32-bit wide instruction
