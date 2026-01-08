@@ -28,7 +28,7 @@ public:
 	enum class Priv { User, Supervisor };
 	void switchPrivileges(Priv priv);
 private:
-	static const unsigned int PHYS_PAGES = 64;
+	static const unsigned int PHYS_PAGES = 256;
 
 	// Bitmap allocator for physical pages
 	PhysAddr physPagesStart;

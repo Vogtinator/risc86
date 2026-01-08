@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MAX_CPUS 16
+#define MAX_CPUS 4
 
 // Define the virtual memory layout
 static const uint64_t

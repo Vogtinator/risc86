@@ -1453,5 +1453,7 @@ void X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::clear()
 template<typename Key, typename Result, size_t numBuckets, size_t entriesPerBucket>
 size_t X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::bucketForKey(Key key)
 {
-	return (key >> 4) % numBuckets;
+	key = (key >> 32) ^ key;
+	key = (key >> 16) ^ key;
+	return key % numBuckets;
 }
