@@ -23,6 +23,7 @@ TranslationResult mmu_translate(Hart *hart, uint64_t addr, AccessType type)
 			.pageoff_mask = mask_1gb,
 			.phys_page_addr = (addr & ~mask_1gb),
 			.canRead = true, .canWrite = true, .canExec = true, .canUser = true,
+			.isGlobal = false,
 		};
 	}
 
@@ -95,11 +96,14 @@ TranslationResult mmu_translate(Hart *hart, uint64_t addr, AccessType type)
 		if (ppn & pageoff_mask)
 			panic("PTE unaligned");
 
+		bool isGlobal = pte & PTE_G;
+
 		return TranslationResult {
 			.pageoff_mask = pageoff_mask,
 			.phys_page_addr = PhysAddr(ppn),
 			.canRead = canRead, .canWrite = canWrite, .canExec = canExec,
 			.canUser = canUser,
+			.isGlobal = isGlobal,
 		};
 	}
 

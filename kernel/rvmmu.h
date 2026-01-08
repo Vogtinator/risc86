@@ -10,6 +10,7 @@ struct TranslationResult {
 	uint64_t pageoff_mask;
 	PhysAddr phys_page_addr;
 	bool canRead, canWrite, canExec, canUser;
+	bool isGlobal;
 };
 
 enum class AccessType {

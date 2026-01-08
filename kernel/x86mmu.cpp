@@ -181,6 +181,8 @@ void X86MMU::addRVMapping(uint64_t virtAddr, TranslationResult *rvMap)
 		flags |= PT_WRITABLE;
 	if (rvMap->canUser)
 		flags |= PT_USER;
+	if (rvMap->isGlobal)
+		flags |= PT_GLOBAL;
 
 	uint64_t phys = rvMap->phys_page_addr,
 	         virt = virtAddr & ~rvMap->pageoff_mask,
