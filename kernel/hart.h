@@ -47,6 +47,16 @@ struct Hart {
 		SCAUSE_INTERRUPT_BASE = 1ull << 63,
 	};
 
+	enum {
+		RM_RNE = 0b000,
+		RM_RTZ = 0b001,
+		RM_RDN = 0b010,
+		RM_RUP = 0b011,
+		RM_RMM = 0b100, RM_LASTVALID = 0b100,
+		// 0b101 and 0b110 are reserved
+		RM_DYN = 0b111,
+	};
+
 	// CSRs
 	uint64_t sstatus;
 	uint64_t stvec;
@@ -205,6 +215,9 @@ private:
 	}
 
 	bool faultOnFSOff(uint32_t inst);
+	void applyFRM(); // Apply rounding mode in fcsr
+	friend struct FPRoundingRAII;
+
 	uint64_t getCSR(uint16_t csr);
 	void setCSR(uint16_t csr, uint64_t value);
 

@@ -1,3 +1,4 @@
+#include <fenv.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdatomic.h> // stdatomic.h needs stdint.h included before
@@ -317,6 +318,90 @@ bool Hart::faultOnFSOff(uint32_t inst)
 	return true;
 }
 
+static const int mapRVRMToFenv[] = {
+	[Hart::RM_RNE] = FE_TONEAREST,
+	[Hart::RM_RTZ] = FE_TOWARDZERO,
+	[Hart::RM_RDN] = FE_DOWNWARD,
+	[Hart::RM_RUP] = FE_UPWARD,
+	[Hart::RM_RMM] = FE_TONEAREST, /* Close enough, right? Right? */
+};
+
+void Hart::applyFRM()
+{
+	auto frm = (this->fcsr >> 5) & 0b111;
+	if (frm > Hart::RM_LASTVALID)
+		panic("Weird frm");
+
+	fesetround(mapRVRMToFenv[frm]);
+}
+
+/* TODO: For now, instruction-level RM overrides are only enabled for
+ * fcvt instructions.
+// RAII helper for temporarily using a different FP rounding mode.
+// Resets to the one in frm on destruction.
+struct FPRoundingRAII {
+	FPRoundingRAII(Hart *hart, uint8_t rm)
+	    : hart(hart)
+	{
+		if (rm != Hart::RM_DYN && rm > Hart::RM_LASTVALID)
+			panic("Weird frm in instruction");
+		else if (rm != Hart::RM_DYN) {
+			fesetround(mapRVRMToFenv[rm]);
+			needsReset = true;
+		}
+	}
+
+	~FPRoundingRAII() {
+		if (needsReset)
+			hart->applyFRM();
+	}
+private:
+	Hart *hart;
+	bool needsReset;
+};*/
+
+/* Using rint(f) or nearbyint(f) is *extremely* slow, newlib implements this
+ * using softfp... Use SSE 4.1 rounds{s,d} instructions which take an imm8
+ * that can override rounding behaviour. */
+static const int mapRVRMtoX86RndImm[] = {
+	[Hart::RM_RNE] = 0b1000,
+	[Hart::RM_RTZ] = 0b1011,
+	[Hart::RM_RDN] = 0b1001,
+	[Hart::RM_RUP] = 0b1010,
+	[Hart::RM_RMM] = 0b1000, /* Close enough, right? Right? */
+	/* TODO: Check invalid rm? */
+	[Hart::RM_DYN] = 0b1100,
+};
+
+template <typename T, int rm> inline T roundWithRVRM(T a);
+template <typename T, int rm> inline float roundWithRVRM(float a) {
+	T ret;
+	auto x86RM = mapRVRMtoX86RndImm[rm];
+	asm("roundss %[x86RM], %[a], %[ret]" : [ret] "=x" (ret) : [a] "x" (a), [x86RM] "i" (x86RM));
+	return ret;
+}
+
+template <typename T, int rm> inline double roundWithRVRM(double a) {
+	T ret;
+	auto x86RM = mapRVRMtoX86RndImm[rm];
+	asm("roundsd %[x86RM], %[a], %[ret]" : [ret] "=x" (ret) : [a] "x" (a), [x86RM] "i" (x86RM));
+	return ret;
+}
+
+/* The rounding mode is an immediate, so needs to be down at assembly time.
+ * Use a template for dispatching. */
+template <typename T> inline T roundWithRVRM(T a, uint8_t rm) {
+	switch (rm) {
+	case Hart::RM_RNE: return roundWithRVRM<T, Hart::RM_RNE>(a);
+	case Hart::RM_RTZ: return roundWithRVRM<T, Hart::RM_RTZ>(a);
+	case Hart::RM_RDN: return roundWithRVRM<T, Hart::RM_RDN>(a);
+	case Hart::RM_RUP: return roundWithRVRM<T, Hart::RM_RUP>(a);
+	case Hart::RM_RMM: return roundWithRVRM<T, Hart::RM_RMM>(a);
+	default:
+	case Hart::RM_DYN: return roundWithRVRM<T, Hart::RM_DYN>(a);
+	}
+}
+
 uint64_t Hart::getCSR(uint16_t csr)
 {
 	// TODO: Permission checks
@@ -380,9 +465,11 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 	case 0x002u: // frm pseudo reg
 		this->fcsr &= ~(0b111ul << 5);
 		this->fcsr |= (value & 0b111) << 5;
+		applyFRM();
 		return;
 	case 0x003u:
 		this->fcsr = value;
+		applyFRM();
 		return;
 	case 0x100u:
 		this->sstatus = value;
@@ -1514,8 +1601,6 @@ void Hart::runInstruction(uint32_t inst)
 		uint32_t funct2 = (inst >> 25u) & 0b11;
 		uint32_t rs3 = (inst >> 27u) & 31u;
 
-		(void) rm; // Rounding modes not implemented
-
 		// Operations common to doubles and floats are deduplicated using this templated lambda.
 		// Return true if instruction executed.
 		auto commonStuff = [&] <typename T, bool isDouble = sizeof(T) == sizeof(double)> () {
@@ -1526,9 +1611,9 @@ void Hart::runInstruction(uint32_t inst)
 				setFReg<T>(rd, genericFMA(getFReg<T>(rs1), getFReg<T>(rs2), -getFReg<T>(rs3)));
 			} else if (op == 0b10 && funct2 == doublebit) { // FNMSUB.{S,D}
 				setFReg<T>(rd, genericFMA(-getFReg<T>(rs1), getFReg<T>(rs2), getFReg<T>(rs3)));
-				} else if (op == 0b11 && funct2 == doublebit) { // FNMADD.{S,D}
+			} else if (op == 0b11 && funct2 == doublebit) { // FNMADD.{S,D}
 				setFReg<T>(rd, genericFMA(-getFReg<T>(rs1), getFReg<T>(rs2), -getFReg<T>(rs3)));
-				} else
+			} else
 				return false;
 
 			return true;
@@ -1580,13 +1665,13 @@ void Hart::runInstruction(uint32_t inst)
 			} else if (funct7 == (0b0010100 | doublebit) && rm == 0b001) { // FMAX.{S,D}
 				setFReg<T>(rd, max(getFReg<T>(rs1), getFReg<T>(rs2)));
 			} else if (funct7 == (0b1100000 | doublebit) && rs2 == 0b00000) { // FCVT.W.{S,D}
-				setReg(rd, int32_t(getFReg<T>(rs1)));
+				setReg(rd, int32_t(roundWithRVRM(getFReg<T>(rs1), rm)));
 			} else if (funct7 == (0b1100000 | doublebit) && rs2 == 0b00001) { // FCVT.WU.{S,D}
-				setReg(rd, uint32_t(getFReg<T>(rs1)));
+				setReg(rd, uint32_t(roundWithRVRM(getFReg<T>(rs1), rm)));
 			} else if (funct7 == (0b1100000 | doublebit) && rs2 == 0b00010) { // FCVT.L.{S,D}
-				setReg(rd, int64_t(getFReg<T>(rs1)));
+				setReg(rd, int64_t(roundWithRVRM(getFReg<T>(rs1), rm)));
 			} else if (funct7 == (0b1100000 | doublebit) && rs2 == 0b00011) { // FCVT.LU.{S,D}
-				setReg(rd, uint64_t(getFReg<T>(rs1)));
+				setReg(rd, uint64_t(roundWithRVRM(getFReg<T>(rs1), rm)));
 			} else if (funct7 == (0b1101000 | doublebit) && rs2 == 0b00000) { // FCVT.{S,D}.W
 				setFReg<T>(rd, int32_t(getReg(rs1)));
 			} else if (funct7 == (0b1101000 | doublebit) && rs2 == 0b00001) { // FCVT.{S,D}.WU
@@ -1877,7 +1962,9 @@ void Hart::runInstruction(uint32_t inst)
 
 void Hart::run()
 {
+	applyFRM();
 	uint32_t counter = 0;
+
 	for(;;)
 	{
 		if ((counter++ % 1024) == 0)
