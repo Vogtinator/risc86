@@ -1750,6 +1750,7 @@ void Hart::runInstruction(uint32_t inst)
 					break;
 				}
 				this->handleInterrupt(Hart::SCAUSE_EBREAK, 0);
+				return;
 			} else if ((inst & 0b1111111'00000'00000'111'11111'1111111) == 0b0001001'00000'00000'000'00000'1110011) { // sfence.vma
 				uint32_t rs1 = (inst >> 15) & 31;
 				uint32_t rs2 = (inst >> 20) & 31;
