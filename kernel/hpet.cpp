@@ -39,6 +39,16 @@ uint32_t hpetFrequency()
 
 uint64_t hpetCurrentTime()
 {
+	uint64_t lapicVal = lapicRead(0x390);
+	uint64_t lastLapicVal = getPerCPU()->hpetCache.lastLAPICVal;
+	if (lapicVal > 0 && lastLapicVal > 0) {
+		//printf("lapicVal: %ld, lastLAPICVal: %ld mul: %ld\n", lapicVal, getPerCPU()->hpetCache.lastLAPICVal, hpetTicksToLAPICTicksMultiplier);
+		uint64_t lapicDiff = lastLapicVal - lapicVal;
+		auto ret = getPerCPU()->hpetCache.lastHPETVal + (lapicDiff << 16) / hpetTicksToLAPICTicksMultiplier;
+		//printf("Ret: %ld Actual: %ld\n", ret, hpetRead(HPET_REG_VAL));
+		//if (ret > hpetRead(HPET_REG_VAL)) panic("WRONG!");
+		return ret;
+	}
 	return hpetRead(HPET_REG_VAL);
 }
 
@@ -61,7 +71,7 @@ bool lapicSetTimeout(uint64_t hpetTarget)
 	if (hpetTarget == ~0ull)
 		return true; // Linux writes all ones to disable it.
 
-	uint64_t hpetCurrent = hpetCurrentTime();
+	uint64_t hpetCurrent = hpetRead(HPET_REG_VAL);
 	if (hpetTarget <= hpetCurrent)
 		return false;
 
@@ -78,6 +88,9 @@ bool lapicSetTimeout(uint64_t hpetTarget)
 		printf("Too many ticks, cutting short\n");
 		lapicDiff = ~0ul;
 	}
+
+	getPerCPU()->hpetCache.lastHPETVal = hpetCurrent;
+	getPerCPU()->hpetCache.lastLAPICVal = lapicDiff;
 
 	lapicWrite(0x380, lapicDiff); // Start timer
 	return true;
