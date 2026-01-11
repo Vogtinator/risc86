@@ -11,6 +11,10 @@ struct PerCpuState {
 	struct Hart hart;
 	X86MMU x86mmu;
 	X86JIT x86jit;
+	struct {
+		uint64_t lastHPETVal;
+		uint64_t lastLAPICVal;
+	} hpetCache;
 	unsigned int cpu_id;
 };
 
