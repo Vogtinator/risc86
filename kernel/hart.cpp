@@ -1166,7 +1166,7 @@ void Hart::runInstruction(uint32_t inst)
 		case 0x5u: // sr(l,a)iw
 			if ((rawimm >> 5u) == 0) // srliw
 				setReg(rd, int32_t(uint32_t(getReg(rs1)) >> (rawimm & 31u)));
-			else if ((rawimm >> 6u) == 0x10u) // sraiw
+			else if ((rawimm >> 5u) == 0x20u) // sraiw
 				setReg(rd, int32_t(uint32_t(getReg(rs1))) >> (rawimm & 31u));
 			else
 				panic("Shift not supported");
