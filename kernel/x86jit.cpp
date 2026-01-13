@@ -545,7 +545,6 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		emit8(0xC1);
 		emit8(0xC0 | (4 << 3) | regLow3Bits(rdX86));
 		emitRaw<int8_t>(imm);
-
 		return true;
 	} else if ((inst & 0xEF83) == 0x6101) { // c.addi16sp (must come before c.lui)
 		uint16_t imm9  = (inst >> 12) & 1,
@@ -603,6 +602,51 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 
 		X86Reg rdX86 = mapRVRegForReadWrite64(rd);
 		emitAddImmediate(rdX86, imm);
+		return true;
+	} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'00'000'00000'01) { // c.srli
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm40 = (inst >>  2) & 0x1F;
+
+		uint16_t imm = (imm5 << 5) | imm40;
+		uint32_t rd = ((inst >> 7) & 7) + 8;
+
+		X86Reg rdX86 = mapRVRegForReadWrite64(rd);
+
+		// shr imm8, %rdX86
+		emitREX(true, false, false, regREXBit(rdX86));
+		emit8(0xC1);
+		emit8(0xC0 | (5 << 3) | regLow3Bits(rdX86));
+		emitRaw<int8_t>(imm);
+		return true;
+	} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'01'000'00000'01) { // c.srai
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm40 = (inst >>  2) & 0x1F;
+
+		uint16_t imm = (imm5 << 5) | imm40;
+		uint32_t rd = ((inst >> 7) & 7) + 8;
+
+		X86Reg rdX86 = mapRVRegForReadWrite64(rd);
+
+		// sar imm8, %rdX86
+		emitREX(true, false, false, regREXBit(rdX86));
+		emit8(0xC1);
+		emit8(0xC0 | (7 << 3) | regLow3Bits(rdX86));
+		emitRaw<int8_t>(imm);
+		return true;
+	} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'10'000'00000'01) { // c.andi
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm40 = (inst >>  2) & 0x1F;
+
+		int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
+		uint32_t rd = ((inst >> 7) & 7) + 8;
+
+		X86Reg rdX86 = mapRVRegForReadWrite64(rd);
+
+		// and imm32, %rdX86
+		emitREX(true, false, false, regREXBit(rdX86));
+		emit8(0x81);
+		emit8(0xC0 | (4 << 3) | regLow3Bits(rdX86));
+		emitRaw<int32_t>(imm);
 		return true;
 	} else if ((inst & 0b111'000000'00000'11) == 0b111'000000'00000'10) { // c.sdsp
 		uint16_t imm53 = (inst >> 10) & 7,
