@@ -412,6 +412,13 @@ X86JIT::X86Reg X86JIT::mapRVRegForReadWrite64(RVReg rvReg)
 	return ret;
 }
 
+X86JIT::X86Reg X86JIT::mapRVRegForReadWrite32(RVReg rvReg)
+{
+	X86Reg ret = mapRVRegForRead32(rvReg);
+	(void) mapRVRegForWrite32(rvReg);
+	return ret;
+}
+
 void X86JIT::emitFlushRegsToHart()
 {
 	for (int rv = 0; rv < 32; ++rv)
@@ -602,6 +609,16 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		uint32_t rd = (inst >> 7) & 0x1F;
 
 		X86Reg rdX86 = mapRVRegForReadWrite64(rd);
+		emitAddImmediate(rdX86, imm);
+		return true;
+	} else if ((inst & 0b111'0'00000'00000'11) == 0b001'0'00000'00000'01) { // c.addiw
+		uint16_t imm5  = (inst >> 12) & 1,
+		        imm40 = (inst >>  2) & 0x1F;
+
+		int16_t imm = int16_t(((imm5 << 5) | imm40) << 10) >> 10;
+		uint32_t rd = (inst >> 7) & 0x1F;
+
+		X86Reg rdX86 = mapRVRegForReadWrite32(rd);
 		emitAddImmediate(rdX86, imm);
 		return true;
 	} else if ((inst & 0b111'0'11'000'00000'11) == 0b100'0'00'000'00000'01) { // c.srli

@@ -79,6 +79,7 @@ private:
 	X86Reg mapRVRegForWrite32(RVReg rvReg);
 	X86Reg mapRVRegForWrite64(RVReg rvReg);
 	X86Reg mapRVRegForReadWrite64(RVReg rvReg);
+	X86Reg mapRVRegForReadWrite32(RVReg rvReg);
 	void emitFlushRegsToHart();
 
 	// Emit jmp away to a new PC, leaving this translation.
