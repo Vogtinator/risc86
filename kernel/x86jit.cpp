@@ -1102,6 +1102,51 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		emitAddImmediate(rdX86, imm);
 		return true;
 	}
+	case 0x1Bu: // integer immediate (RV64I)
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		int64_t imm = int32_t(inst) >> 20u;
+		uint64_t rawimm = inst >> 20u;
+
+		X86Reg rs1X86 = mapRVRegForRead32(rs1),
+		       rdX86 = mapRVRegForWrite32(rd);
+
+		switch (funct3)
+		{
+		case 0x0u: // addiw
+			// lea off32(%rs1X86), %rdX86(32bit)
+			emitREX(false, regREXBit(rdX86), false, regREXBit(rs1X86));
+			emit8(0x8D);
+			emit8(0x80 | (regLow3Bits(rdX86) << 3) | regLow3Bits(rs1X86));
+			emitRaw<int32_t>(imm);
+			return true;
+		case 0x1u: // slliw
+		case 0x5u: { // srliw and sraiw
+			emitMovRegReg(rs1X86, rdX86);
+			uint8_t shiftSubOp = 0;
+			if (funct3 == 1 && (rawimm >> 5u) == 0) { // slli
+				shiftSubOp = 4; // shl
+			} else if (funct3 == 5 && (rawimm >> 5u) == 0) { // srli
+				shiftSubOp = 5; // shr
+			} else if (funct3 == 5 && (rawimm >> 5u) == 0x20) { // sari
+				shiftSubOp = 7; // sar
+			} else
+				panic("Shift not supported");
+
+			// $shiftSubOp imm8, %rdX86(32bit)
+			emitREX(false, false, false, regREXBit(rdX86));
+			emit8(0xC1);
+			emit8(0xC0 | (shiftSubOp << 3) | regLow3Bits(rdX86));
+			emitRaw<int8_t>(rawimm & 31u);
+			return true;
+		}
+		default:
+			panic("Unsupported instruction");
+		}
+		break;
+	}
 	case 0x23u: // store
 	{
 		uint32_t funct3 = (inst >> 12u) & 7u;
