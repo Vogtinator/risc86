@@ -528,6 +528,7 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		const int16_t offs = int16_t(imm << 4) >> 4;
 
 		emitPCRelativeJump(addr, offs);
+		jumpsAway = true;
 		return true;
 	} else if ((inst & 0xE003) == 0x4001) { // c.li
 		uint16_t imm5  = (inst >> 12) & 1,
