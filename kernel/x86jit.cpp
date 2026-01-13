@@ -1003,6 +1003,13 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		int64_t imm = int32_t(inst) >> 20u;
 		uint64_t rawimm = inst >> 20u;
 
+		// Need to return false before any register mappings are done
+		if (funct3 == 1 && (rawimm >> 6u) != 0)
+			return false;
+
+		if (funct3 == 5 && (rawimm >> 6u) != 0 && (rawimm >> 6u) != 0x10)
+			return false;
+
 		X86Reg rs1X86 = mapRVRegForRead64(rs1),
 		       rdX86 = mapRVRegForWrite64(rd);
 
@@ -1109,6 +1116,13 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		uint32_t rs1 = (inst >> 15u) & 31u;
 		int64_t imm = int32_t(inst) >> 20u;
 		uint64_t rawimm = inst >> 20u;
+
+		// Need to return false before any register mappings are done
+		if (funct3 == 1 && (rawimm >> 5u) != 0)
+			return false;
+
+		if (funct3 == 5 && (rawimm >> 5u) != 0 && (rawimm >> 5u) != 0x20)
+			return false;
 
 		X86Reg rs1X86 = mapRVRegForRead32(rs1),
 		       rdX86 = mapRVRegForWrite32(rd);
