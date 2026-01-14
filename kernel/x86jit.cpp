@@ -436,15 +436,17 @@ void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
 
 	// Calculate the new PC
 	auto newPcPhys = pcPhys + imm;
+
+	// If the target is in the same page and already JIT translated,
+	// jump to it (if there's no interrupt pending)
 	uint8_t *jumpDestination = nullptr;
-
-	// Target already JIT translated?
 	if (newPcPhys == thisTranslationStartPC)
-		jumpDestination = thisTranslationStartCode;
-	else if (!codeHashMap.lookup(newPcPhys, &jumpDestination))
-		jumpDestination = nullptr;
+		jumpDestination = thisTranslationStartCode; // Start of this translation
+	else if ((newPcPhys >> 12) != (thisTranslationStartPC >> 12))
+		jumpDestination = nullptr; // Different page
+	else if (uint8_t *translatedDest; codeHashMap.lookup(newPcPhys, &translatedDest))
+		jumpDestination = translatedDest;
 
-	// If it's the beginning of this translation, loop back to the start
 	if (jumpDestination != nullptr) {
 		// Check if there's an interrupt
 		// cmpb $0, off32(%rdi)
@@ -453,22 +455,22 @@ void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
 		emitRaw<int32_t>(offsetof(Hart, irqPending));
 		emit8(0x00);
 
-		// Otherwise, loop back to the start!
-		int32_t jmpOff = thisTranslationStartCode - codeRegionCurrent;
+		// Otherwise, jump directly to the translation
+		ptrdiff_t jmpOff = jumpDestination - codeRegionCurrent;
+		if(jmpOff < INT32_MIN || jmpOff > INT32_MAX)
+			panic("jmp out of range");
 
 		// Short jump?
 		int32_t jmpOffShort = jmpOff - 2;
 		if (jmpOffShort >= INT8_MIN && jmpOffShort <= INT8_MAX) {
 			// je off8
 			emit8(0x74);
-			//emitRaw<int8_t>(jmpOffShort);
-			emit8(0);
+			emitRaw<int8_t>(jmpOffShort);
 		} else {
 			int32_t jmpOffNear = jmpOff - 6;
 			// je off32
 			emit8(0x0F); emit8(0x84);
-			//emitRaw<int32_t>(jmpOffNear);
-			emitRaw<int32_t>(0);
+			emitRaw<int32_t>(jmpOffNear);
 		}
 	}
 
