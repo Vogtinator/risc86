@@ -77,7 +77,13 @@ mov %ax, %ss
 # Enable some CPU features
 mov %cr4, %rax
 or $(1 << 9), %rax # Enable OSFXSR for XMM
+or $(1 << 18), %rax # Enable OSFXSR for XMM
 mov %rax, %cr4
+
+mov $0, %ecx
+xgetbv
+or $0b11100111, %eax # Enable AVX512, AVX, SSE and x86
+xsetbv
 
 # Get the CPU's number into %edi
 xor %eax, %eax

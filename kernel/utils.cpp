@@ -23,7 +23,7 @@ void panic(const char *fmt, ...)
 		va_end(va);
 
 		fprintf(stderr, "\nVirtual CPU state: \n");
-		getPerCPU()->hart.dump();
+        //getPerCPU()->hart.dump();
 		fflush(stdout);
 		fprintf(stderr, "\n");
 	} else if (in_panic == 2) {
@@ -32,6 +32,6 @@ void panic(const char *fmt, ...)
 		write(2, fmt, strlen(fmt));
 		write(2, "\n", 1);
 	}
-
-	__builtin_trap();
+asm volatile("cli; hlt");
+    //__builtin_trap();
 }
