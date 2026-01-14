@@ -1232,6 +1232,13 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		    || subOp == 0x014 || subOp == 0x015 || subOp == 0x016 || subOp == 0x017)
 			return false;
 
+		// Translation is more efficient if rd and rs2 are different.
+		// In case they are not and the operation is commutative, swap rs1 and rs2.
+		if (rd == rs2)
+			if (subOp == 0x000u // add
+			    || subOp == 0x004u || subOp == 0x006u || subOp == 0x007u) // xor, or, and
+				swap(rs1, rs2);
+
 		X86Reg rs1X86 = mapRVRegForRead64(rs1),
 		       rs2X86 = mapRVRegForRead64(rs2),
 		       rdX86 = mapRVRegForWrite64(rd);
@@ -1245,8 +1252,15 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		case 0x004u: // xor
 		case 0x006u: // or
 		case 0x007u: // and
-			// %rax = %rs1X86
-			emitMovRegReg(rs1X86, X86Reg::RAX);
+			// Usual x86 operations are destructive (rd = rd op rs1),
+			// so non-destructive operations need a move to emulate rd = rs1 op rs2.
+			// In case rd and rs2 are the same register, use rax as temporary.
+			if (rd == rs2) {
+				// %rax = %rs1X86
+				emitMovRegReg(rs1X86, X86Reg::RAX);
+			} else
+				emitMovRegReg(rs1X86, rdX86);
+
 			uint8_t x86Op;
 			if (subOp == 0x000) // add
 				x86Op = 0x01; // add
@@ -1261,13 +1275,20 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			else
 				panic("Op not supported");
 
-			// $opc %rs2X86, %rax
-			emitREX(true, regREXBit(rs2X86), false, regREXBit(X86Reg::RAX));
-			emit8(x86Op);
-			emit8(0xC0 | (regLow3Bits(rs2X86) << 3) | regLow3Bits(X86Reg::RAX));
+			if (rd == rs2) {
+				// $opc %rs2X86, %rax
+				emitREX(true, regREXBit(rs2X86), false, regREXBit(X86Reg::RAX));
+				emit8(x86Op);
+				emit8(0xC0 | (regLow3Bits(rs2X86) << 3) | regLow3Bits(X86Reg::RAX));
 
-			// %rdX86 = %rax
-			emitMovRegReg(X86Reg::RAX, rdX86);
+				// %rdX86 = %rax
+				emitMovRegReg(X86Reg::RAX, rdX86);
+			} else {
+				// $opc %rs2X86, %rdX86
+				emitREX(true, regREXBit(rs2X86), false, regREXBit(rdX86));
+				emit8(x86Op);
+				emit8(0xC0 | (regLow3Bits(rs2X86) << 3) | regLow3Bits(rdX86));
+			}
 			return true;
 		case 0x001u: // sll
 		case 0x005u: // srl
