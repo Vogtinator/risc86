@@ -454,8 +454,13 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 	__asm volatile("mov %%cr4, %[cr4]\n" : [cr4] "=r" (cr4));
 	cr4 |= (1 << 9); // Enable OSFXSR for XMM
 	// Disabled for now, would require AVX+ which is not needed:
-	// cr4 |= (1 << 18); // Enable OSXSAVE for YMM/ZMM
+	cr4 |= (1 << 18); // Enable OSXSAVE for YMM/ZMM
 	__asm volatile("mov %[cr4], %%cr4\n" :: [cr4] "r" (cr4));
+
+	uint32_t xcr0lo, xcr0hi;
+	__asm volatile("xgetbv" : "=a" (xcr0lo), "=d" (xcr0hi) : "c" (0));
+	xcr0lo |= 0b00000111; // Enable AVX, SSE and x87
+	__asm volatile("xsetbv" :: "a" (xcr0lo), "d" (xcr0hi), "c" (0));
 
 	// Enable paging
 	__asm volatile("mov %[pml4], %%cr3\n" :: [pml4] "r" (pml4));
