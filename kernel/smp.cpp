@@ -82,7 +82,7 @@ mov %rax, %cr4
 
 mov $0, %ecx
 xgetbv
-or $0b11100111, %eax # Enable AVX512, AVX, SSE and x86
+or $0b00000111, %eax # Enable AVX, SSE and x86
 xsetbv
 
 # Get the CPU's number into %edi

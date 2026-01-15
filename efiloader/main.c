@@ -459,8 +459,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     uint32_t xcr0lo, xcr0hi;
     __asm volatile("xgetbv" : "=a" (xcr0lo), "=d" (xcr0hi) : "c" (0));
-    xcr0lo |= 0b11100111; // Enable AVX512, AVX, SSE and x86
-    __asm volatile("xsetbv" :: "a" (xcr0lo), "d" (xcr0hi), "c" (0));
+	xcr0lo |= 0b00000111; // Enable AVX512, AVX, SSE and x87
+	__asm volatile("xsetbv" :: "a" (xcr0lo), "d" (xcr0hi), "c" (0));
 
 	// Enable paging
 	__asm volatile("mov %[pml4], %%cr3\n" :: [pml4] "r" (pml4));

@@ -1,4 +1,4 @@
-c_args = ['-ffreestanding', '-nostdlib', '-march=x86-64-v4']
+c_args = ['-ffreestanding', '-nostdlib']
 
 c_args += ['-DUACPI_BAREBONES_MODE']
 
