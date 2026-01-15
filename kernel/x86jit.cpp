@@ -57,6 +57,8 @@ bool X86JIT::tryJit(Hart *hart, PhysAddr pcPhys)
 		codeHashMap.insert(pcPhys, code);
 	}
 
+	codeHashMapVirt.insert(hart->pc, code);
+
 	uint32_t scause = jumpToCode(hart, code);
 
 	if (scause != 0) { // Fault?
@@ -67,12 +69,31 @@ bool X86JIT::tryJit(Hart *hart, PhysAddr pcPhys)
 	return true;
 }
 
+bool X86JIT::tryJitVirt(Hart *hart, uint64_t pcVirt)
+{
+	uint8_t *code;
+	if (!codeHashMapVirt.lookup(pcVirt, &code))
+		return false;
+
+	uint32_t scause = jumpToCode(hart, code);
+
+	if (scause != 0) { // Fault?
+		// stval already set by the page fault handler
+		hart->handleInterrupt(scause, hart->stval);
+	}
+
+	return true;
+}
+
+void X86JIT::resetVirtMap() { codeHashMapVirt.clear(); }
+
 void X86JIT::reset()
 {
 	codeRegionCurrent = codeRegionStart;
 
 	// Reset RV -> JIT code mappings
 	codeHashMap.clear();
+	codeHashMapVirt.clear();
 }
 
 uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
