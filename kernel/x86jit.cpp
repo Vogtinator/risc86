@@ -78,6 +78,9 @@ void X86JIT::reset()
 uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 {
 	uint32_t ret;
+	static_assert(hartPtrReg == X86Reg::RDI); // Hardcoded below
+	static_assert(x86DynRegFirst == X86Reg::R8); // Hardcoded below
+	static_assert(x86DynRegLast == X86Reg::R15); // Hardcoded below
 	asm("call %A[code]"
 	    : "=a" (ret)
 	    : [code] "r" (code), "D" (hart)
@@ -311,7 +314,7 @@ void X86JIT::markRVRegFlushed(RVReg rvReg)
 X86JIT::X86Reg X86JIT::findFreeDynReg()
 {
 	// Try to find a free register
-	for (X86Reg r = x86DynRegFirst; r < x86DynRegLast; r = X86Reg(uint8_t(r) + 1)) {
+	for (X86Reg r = x86DynRegFirst; r <= x86DynRegLast; r = X86Reg(uint8_t(r) + 1)) {
 		if (r == X86Reg::R12) {
 			// Its three low bits are the same as %rsp, so %r12 also gets special
 			// treatment in ModRM. Just avoid it.

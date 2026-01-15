@@ -66,7 +66,7 @@ private:
 
 	// High-level helpers for RV register management
 	// Use %r8-%r15, but skip %r12 as it has a different meaning in ModRM...
-	const X86Reg x86DynRegFirst = X86Reg::R8, x86DynRegLast = X86Reg::R15;
+	static const X86Reg x86DynRegFirst = X86Reg::R8, x86DynRegLast = X86Reg::R15;
 	// Flushes RV reg to struct Hart, does not change reg map.
 	void emitFlushRVReg(RVReg rvReg);
 	// Changes reg map accordingly.
