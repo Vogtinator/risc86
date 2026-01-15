@@ -16,7 +16,6 @@
  */
 
 /* Ideas for further optimization:
- * - Also try to direct jump to the next instruction when leaving the page?
  * - Optimize findFreeDynReg by having an inverse map?
  * - Have the generated code push/pop clobbered dyn regs?
  * - Only save/restore registers that are used by mappings?
@@ -27,6 +26,7 @@
  * - More eager flushing of dirty regs also in the hot path,
  *   so that there's less flushing in early exit (cond jump, fault handle) paths?
  * - Track if clc is neccessary
+ * - Support immediate displacement in load/stores
  */
 
 X86JIT::X86JIT() {}
@@ -1530,11 +1530,8 @@ bool X86JIT::translate(PhysAddr entry)
 		return false;
 
 	// Leave the generated code if the last translation didn't do that already.
-	if (!jumpsAway) {
-		emitUpdateHartPC(addr);
-		emitFlushRegsToHart();
-		emitRet(0);
-	}
+	if (!jumpsAway)
+		emitPCRelativeJump(addr, 0);
 
 	// Reset register mappings
 	__builtin_memset(rvRegsToX86, 0, sizeof(rvRegsToX86));
