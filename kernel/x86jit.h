@@ -14,6 +14,8 @@ public:
 	// Try to generate (if necessary) and run code for the current hart state.
 	// Returns false if fallback to the interpreter is neccessary.
 	bool tryJit(Hart *hart, PhysAddr pcPhys);
+	bool tryJitVirt(Hart *hart, uint64_t pcVirt);
+	void resetVirtMap();
 
 	// Discard all translations.
 	void reset();
@@ -226,4 +228,5 @@ private:
 	uint64_t jitScause;
 
 	CodeHashMap<PhysAddr, uint8_t*, 1<<16, 2> codeHashMap;
+	CodeHashMap<uint64_t, uint8_t*, 1<<5, 4> codeHashMapVirt;
 };

@@ -568,6 +568,7 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 		if ((value >> 60) == 0 || (value >> 60) == 8) { // Only bare or Sv39
 			this->satp = value & ~(0xFFFFul << 44); // Mask off ASID
 			getPerCPU()->x86mmu.resetContext();
+			getPerCPU()->x86jit.resetVirtMap();
 		} else
 			panic("Unsupported SATP value %lx", value);
 		return;
@@ -1880,6 +1881,8 @@ void Hart::runInstruction(uint32_t inst)
 					getPerCPU()->x86mmu.resetContext();
 				else
 					getPerCPU()->x86mmu.flushRVMappingAtomic(getReg(rs1), PAGE_SIZE);
+
+				getPerCPU()->x86jit.resetVirtMap();
 			} else if (inst == 0x10200073) {
 				this->handleSRET();
 				this->handlePendingInterrupts();
@@ -2003,6 +2006,9 @@ void Hart::run()
 			this->handlePendingInterrupts();
 
 #if !NO_JIT
+		if (jit->tryJitVirt(this, this->pc))
+			continue;
+
 		PhysAddr pcPhys;
 		if (!fetchInstructionPhys(&pcPhys, this->pc))
 			continue;
