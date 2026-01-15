@@ -14,8 +14,12 @@ public:
 	void init();
 	// Configure MMU on the current CPU.
 	void initPerCPU();
-	// Remove all (non-global) guest mappings and switch to the new set.
-	CALLED_FROM_IRQ void resetContext();
+	// Switch to a speciic ASID
+	CALLED_FROM_IRQ void switchToContext(unsigned int asid);
+	// Remove all (non-global) guest mappings for this ASID.
+	CALLED_FROM_IRQ void resetContext(unsigned int asid);
+	// Remove all (non-global) guest mappings for all ASIDs.
+	CALLED_FROM_IRQ void resetAllContexts();
 	// Add the RISC-V MMU mapping to the currently active page tables
 	CALLED_FROM_IRQ void addRVMapping(uint64_t virtAddr, TranslationResult *rvMap);
 	// Drop mappings from the active page tables
@@ -27,8 +31,12 @@ public:
 
 	enum class Priv { User, Supervisor };
 	void switchPrivileges(Priv priv);
+
+	static const unsigned int ASID_LOG2 = 3;
+	static const unsigned int NUM_ASIDS = 1 << ASID_LOG2;
+	static const unsigned int ASID_MASK = NUM_ASIDS - 1;
 private:
-	static const unsigned int PHYS_PAGES = 256;
+	static const unsigned int PHYS_PAGES = 512;
 
 	// Bitmap allocator for physical pages
 	PhysAddr physPagesStart;
@@ -51,7 +59,7 @@ private:
 
 	CALLED_FROM_IRQ size_t doOneMapping(uintptr_t phys, uintptr_t virt, uintptr_t size, uint64_t flags);
 
-	// PML4 tables. Switching between them to flush non-global TLB entries.
-	PhysAddr pml4p[2];
-	bool pml4pIdx;
+	// PML4 tables for each RV ASID.
+	PhysAddr pml4pForASID[NUM_ASIDS];
+	unsigned int currentASID;
 };

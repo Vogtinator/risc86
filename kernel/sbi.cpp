@@ -36,8 +36,11 @@ static void internalIPIHandler(InterruptFrame *frame)
 	if (hart->state == Hart::State::START_PENDING)
 		hart->state = Hart::State::STARTED;
 	else if (hart->rfence_state == Hart::RFenceState::Requested) {
-		if (hart->rfence_size == ~0ul || (hart->rfence_addr == 0 && hart->rfence_size == 0))
-			getPerCPU()->x86mmu.resetContext();
+		if (hart->rfence_asid == UINT64_MAX)
+			getPerCPU()->x86mmu.resetAllContexts();
+		else if (hart->rfence_size == ~0ul || (hart->rfence_addr == 0 && hart->rfence_size == 0)
+		         || hart->rfence_asid != ((hart->satp >> 44) & X86MMU::ASID_MASK))
+			getPerCPU()->x86mmu.resetContext(hart->rfence_asid);
 		else
 			getPerCPU()->x86mmu.flushRVMapping(hart->rfence_addr, hart->rfence_size);
 
@@ -173,8 +176,6 @@ static uint64_t sbiCall(Hart *hart, uint64_t *result)
 			         start_addr = hart->regs[12], size = hart->regs[13],
 			         asid = hart->regs[14];
 
-			(void) asid; // Ignored for now
-
 			for (int hartBit = 0; hartBit < 64; ++hartBit) {
 				if ((hart_mask & (1ul << hartBit)) == 0)
 					continue;
@@ -198,6 +199,7 @@ static uint64_t sbiCall(Hart *hart, uint64_t *result)
 				// Set values
 				otherHart->rfence_addr = start_addr;
 				otherHart->rfence_size = size;
+				otherHart->rfence_asid = func == 2 ? asid : UINT64_MAX;
 				// Set state to Requested
 				otherHart->rfence_state = Hart::RFenceState::Requested;
 				// Send IPI

@@ -105,7 +105,7 @@ struct Hart {
 		Requested,
 		Completed,
 	} rfence_state;
-	_Atomic uint64_t rfence_addr, rfence_size;
+	_Atomic uint64_t rfence_addr, rfence_size, rfence_asid;
 
 	// For LR/SC emulation
 	bool lr_sc_pending;

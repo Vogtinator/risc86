@@ -115,13 +115,10 @@ void X86MMU::initGlobal()
 
 void X86MMU::init()
 {
-	// Dynamically managed pages + two PML4 pages
-	physPagesStart = physMemMgr.allocate((PHYS_PAGES + 2) * PAGE_SIZE, MemRegionPageTables);
+	// Dynamically managed pages + PML4 pages for each ASID
+	physPagesStart = physMemMgr.allocate((PHYS_PAGES + NUM_ASIDS) * PAGE_SIZE, MemRegionPageTables);
 	if (physPagesStart & (PAGE_SIZE - 1))
 		panic("Allocation not page aligned");
-
-	pml4p[0] = physPagesStart + (PHYS_PAGES * PAGE_SIZE);
-	pml4p[1] = physPagesStart + ((PHYS_PAGES + 1) * PAGE_SIZE);
 
 	// Mark all pages as free
 	for (auto &e : freePageBitmap)
@@ -133,8 +130,9 @@ void X86MMU::init()
 	__asm volatile("mov %%cr3, %[pml4]\n" : [pml4] "=r" (efiloaderPML4phys));
 	uint64_t *efiloaderPML4 = phys_to_virt<uint64_t>(efiloaderPML4phys);
 
-	for (unsigned int i = 0; i < sizeof(pml4p) / sizeof(pml4p[0]); ++i) {
-		uint64_t *pml4pVirt = phys_to_virt<uint64_t>(pml4p[i]);
+	for (unsigned int i = 0; i < sizeof(pml4pForASID) / sizeof(pml4pForASID[0]); ++i) {
+		pml4pForASID[i] = physPagesStart + (PHYS_PAGES * PAGE_SIZE);
+		uint64_t *pml4pVirt = phys_to_virt<uint64_t>(pml4pForASID[i]);
 		memcpy(pml4pVirt, efiloaderPML4, PAGE_SIZE);
 	}
 }
@@ -148,7 +146,32 @@ void X86MMU::initPerCPU()
 	cr0 |= 1 << 16;
 	__asm volatile("mov %[cr0], %%cr0\n" :: [cr0] "r" (cr0));
 
-	resetContext();
+	switchToContext(0);
+}
+
+void X86MMU::switchToContext(unsigned int asid)
+{
+	if (asid >= NUM_ASIDS)
+		panic("ASID OOB");
+
+	auto currentPML4P = pml4pForASID[asid];
+	currentASID = asid;
+
+	__asm volatile("mov %[pml4], %%cr3\n" :: [pml4] "r" (currentPML4P));
+}
+
+void X86MMU::resetContext(unsigned int asid)
+{
+	if (asid >= NUM_ASIDS)
+		panic("ASID OOB");
+
+	PhysAddr pml4pASID = pml4pForASID[asid];
+	uint64_t *pml4pASIDVirt = phys_to_virt<uint64_t>(pml4pASID);
+	pml4pASIDVirt[0] = 0;
+	pml4pASIDVirt[511] = 0;
+
+	if (asid == currentASID)
+		switchToContext(asid);
 }
 
 // There is a lot of optimization potential here:
@@ -156,15 +179,10 @@ void X86MMU::initPerCPU()
 // * Implement ASIDs, keep non-active mappings cached
 // * Free page tables on mapping removal
 // * Keep track of global mappings and keep them on context reset
-void X86MMU::resetContext()
+void X86MMU::resetAllContexts()
 {
-	pml4pIdx ^= 1;
-	PhysAddr pml4pNew = pml4p[pml4pIdx];
-	uint64_t *pml4pNewVirt = phys_to_virt<uint64_t>(pml4pNew);
-	pml4pNewVirt[0] = 0;
-	pml4pNewVirt[511] = 0;
-
-	__asm volatile("mov %[pml4], %%cr3\n" :: [pml4] "r" (pml4pNew));
+	for (unsigned int asid = 0; asid < NUM_ASIDS; ++asid)
+		resetContext(asid);
 
 	// Mark all pages as free
 	for (auto &e : freePageBitmap)
@@ -190,7 +208,7 @@ void X86MMU::addRVMapping(uint64_t virtAddr, TranslationResult *rvMap)
 		size -= mappedSize;
 		if (mappedSize == 0) {
 			// On allocation failure, flush everything and try again.
-			resetContext();
+			resetAllContexts();
 			return addRVMapping(virtAddr, rvMap);
 		}
 	}
@@ -290,7 +308,7 @@ size_t X86MMU::doOneMapping(uintptr_t phys, uintptr_t virt, uintptr_t size, uint
 	if ((phys & 0xFFF) || (virt & 0xFFF) || (size & 0xFFF) || size == 0)
 		panic("Called with invalid parameters");
 
-	uint64_t *pml4 = phys_to_virt<uint64_t>(pml4p[pml4pIdx]);
+	uint64_t *pml4 = phys_to_virt<uint64_t>(pml4pForASID[currentASID]);
 	uint64_t *pml4e = &pml4[(virt >> 39) & 0x1FF];
 
 	uint64_t *pdpt;

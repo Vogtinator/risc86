@@ -562,8 +562,12 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 		break;
 	} case 0x180u:
 		if ((value >> 60) == 0 || (value >> 60) == 8) { // Only bare or Sv39
-			this->satp = value & ~(0xFFFFul << 44); // Mask off ASID
-			getPerCPU()->x86mmu.resetContext();
+			if ((this->satp >> 60) == 0) // TODO: Why?
+				getPerCPU()->x86mmu.resetAllContexts();
+
+			uint64_t asid_invmask = 0xFFFF & ~X86MMU::ASID_MASK;
+			this->satp = value & ~(asid_invmask << 44); // Mask off unimpl. ASID
+			getPerCPU()->x86mmu.switchToContext((this->satp >> 44) & X86MMU::ASID_MASK);
 		} else
 			panic("Unsupported SATP value %lx", value);
 		return;
@@ -1871,9 +1875,10 @@ void Hart::runInstruction(uint32_t inst)
 
 				//printf("Doing some fencing for %lx\n", getReg(rs1));
 
-				(void) rs2; // No ASID support
-				if (rs1 == 0)
-					getPerCPU()->x86mmu.resetContext();
+				if (rs2 == 0)
+					getPerCPU()->x86mmu.resetAllContexts();
+				else if (rs1 == 0 || getReg(rs2) != ((this->satp >> 44) & 7))
+					getPerCPU()->x86mmu.resetContext(getReg(rs2));
 				else
 					getPerCPU()->x86mmu.flushRVMappingAtomic(getReg(rs1), PAGE_SIZE);
 			} else if (inst == 0x10200073) {
