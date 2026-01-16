@@ -382,30 +382,27 @@ X86JIT::X86Reg X86JIT::mapRVRegForRead32(RVReg rvReg)
 	return mapRVRegForRead(rvReg, true);
 }
 
-X86JIT::X86Reg X86JIT::mapRVRegForWrite64(RVReg rvReg)
+X86JIT::X86Reg X86JIT::mapRVRegForWrite(RVReg rvReg, bool is32bits)
 {
 	auto &mapEntry = rvRegsToX86[rvReg];
 	if (mapEntry.x86reg == NotMapped) {
 		mapEntry.x86reg = findFreeDynReg();
 	}
 
-	mapEntry.bits32 = false;
+	mapEntry.bits32 = is32bits;
 	mapEntry.dirty = true;
 	mapEntry.usedAtPC = thisTranslationCurrentPC;
 	return mapEntry.x86reg;
 }
 
+X86JIT::X86Reg X86JIT::mapRVRegForWrite64(RVReg rvReg)
+{
+	return mapRVRegForWrite(rvReg, false);
+}
+
 X86JIT::X86Reg X86JIT::mapRVRegForWrite32(RVReg rvReg)
 {
-	auto &mapEntry = rvRegsToX86[rvReg];
-	if (mapEntry.x86reg == NotMapped) {
-		mapEntry.x86reg = findFreeDynReg();
-	}
-
-	mapEntry.bits32 = true;
-	mapEntry.dirty = true;
-	mapEntry.usedAtPC = thisTranslationCurrentPC;
-	return mapEntry.x86reg;
+	return mapRVRegForWrite(rvReg, true);
 }
 
 X86JIT::X86Reg X86JIT::mapRVRegForReadWrite64(RVReg rvReg)
@@ -1220,7 +1217,10 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		return true;
 	}
 	case 0x33u: // integer register
+	case 0x3Bu: // integer register (RV64)
 	{
+		bool is32bit = opc == 0x3B;
+
 		uint32_t funct3 = (inst >> 12u) & 7u;
 		uint32_t rd = (inst >> 7u) & 31u;
 		uint32_t rs1 = (inst >> 15u) & 31u;
@@ -1228,9 +1228,19 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		uint32_t funct7 = inst >> 25u;
 
 		uint32_t subOp = (funct7 << 4u) | funct3;
-		if (subOp == 0x012
-		    || subOp == 0x014 || subOp == 0x015 || subOp == 0x016 || subOp == 0x017)
-			return false;
+
+		// Return early if not supported
+		if (is32bit) {
+			if (subOp != 0x000 && subOp != 0x200 // addw, subw
+			    && subOp != 0x001 && subOp != 0x005 && subOp != 0x205 // sllw, srlw, sraw
+			    && subOp != 0x010) // mulw
+				return false;
+		} else {
+			// mulhsu and div*/rem* not implemented
+			if (subOp == 0x012
+			    || subOp == 0x014 || subOp == 0x015 || subOp == 0x016 || subOp == 0x017)
+				return false;
+		}
 
 		// Translation is more efficient if rd and rs2 are different.
 		// In case they are not and the operation is commutative, swap rs1 and rs2.
@@ -1239,16 +1249,16 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			    || subOp == 0x004u || subOp == 0x006u || subOp == 0x007u) // xor, or, and
 				swap(rs1, rs2);
 
-		X86Reg rs1X86 = mapRVRegForRead64(rs1),
-		       rs2X86 = mapRVRegForRead64(rs2),
-		       rdX86 = mapRVRegForWrite64(rd);
+		X86Reg rs1X86 = mapRVRegForRead(rs1, is32bit),
+		       rs2X86 = mapRVRegForRead(rs2, is32bit),
+		       rdX86 = mapRVRegForWrite(rd, is32bit);
 
 		switch(subOp)
 		{
-		case 0x000u: // add
+		case 0x000u: // add(w)
 			// lea (%rs1X86, %rs2X86), %rdX86 would be nice, but r12 and r13 are both special,
-			// so do it like the other operations.
-		case 0x200u: // sub
+			// so do it like the other operations. Would also need address size override?
+		case 0x200u: // sub(w)
 		case 0x004u: // xor
 		case 0x006u: // or
 		case 0x007u: // and
@@ -1277,7 +1287,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 
 			if (rd == rs2) {
 				// $opc %rs2X86, %rax
-				emitREX(true, regREXBit(rs2X86), false, regREXBit(X86Reg::RAX));
+				emitREX(!is32bit, regREXBit(rs2X86), false, regREXBit(X86Reg::RAX));
 				emit8(x86Op);
 				emit8(0xC0 | (regLow3Bits(rs2X86) << 3) | regLow3Bits(X86Reg::RAX));
 
@@ -1285,18 +1295,18 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 				emitMovRegReg(X86Reg::RAX, rdX86);
 			} else {
 				// $opc %rs2X86, %rdX86
-				emitREX(true, regREXBit(rs2X86), false, regREXBit(rdX86));
+				emitREX(!is32bit, regREXBit(rs2X86), false, regREXBit(rdX86));
 				emit8(x86Op);
 				emit8(0xC0 | (regLow3Bits(rs2X86) << 3) | regLow3Bits(rdX86));
 			}
 			return true;
-		case 0x001u: // sll
-		case 0x005u: // srl
-		case 0x205u: // sra
+		case 0x001u: // sll(w)
+		case 0x005u: // srl(w)
+		case 0x205u: // sra(w)
 			// %rcx = %rs2X86
 			emitMovRegReg(rs2X86, X86Reg::RCX);
-			// and %63, %cl
-			emit8(0x80); emit8(0xe1); emit8(0x3f);
+			// and $63/$31, %cl
+			emit8(0x80); emit8(0xe1); emit8(is32bit ? 31 : 63);
 
 			uint8_t shiftSubOp;
 			if (subOp == 0x001) // sll
@@ -1311,7 +1321,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			// %rdX86 = %rs1X86
 			emitMovRegReg(rs1X86, rdX86);
 			// $shiftSubOp %cl, %rdX86
-			emitREX(true, false, false, regREXBit(rdX86));
+			emitREX(!is32bit, false, false, regREXBit(rdX86));
 			emit8(0xD3);
 			emit8(0xC0 | (shiftSubOp << 3) | regLow3Bits(rdX86));
 
@@ -1337,7 +1347,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
 
 			return true;
-		case 0x010u: // mul
+		case 0x010u: // mul(w)
 		case 0x011u: // mulh
 		// case 0x012u: // mulhsu not implemented
 		case 0x013u: // mulhu
@@ -1349,7 +1359,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			emitMovRegReg(rs1X86, X86Reg::RAX);
 
 			// (i)mul %rs2X86
-			emitREX(true, false, false, regREXBit(rs2X86));
+			emitREX(!is32bit, false, false, regREXBit(rs2X86));
 			emit8(0xF7);
 			emit8(0xC0 | ((isUnsigned ? 4 : 5) << 3) | regLow3Bits(rs2X86));
 
