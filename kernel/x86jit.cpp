@@ -7,8 +7,8 @@
 /* How the JIT works:
  * In JIT generated code, %rdi points to the current struct Hart,
  * which is used to load/store registers and PC.
- * %rdi has an offset to regs[16] (hartPtrBias), so that all 32 registers
- * can be addressed with an 8-bit signed displacement.
+ * %rdi has an offset to regs[17] (hartPtrBias), so that all 32 registers
+ * (excl. x0) can be addressed with an 8-bit signed displacement.
  * r8-r15 are dynamically allocated and are used for hart register state.
  * The PC is not updated for each instruction but only on demand.
  * The generated code returns with a status code in $eax, that is either
@@ -219,20 +219,32 @@ void X86JIT::emitLoadRVReg(RVReg rvReg, X86Reg x86Reg)
 
 void X86JIT::emitLoadPC(X86Reg x86Reg)
 {
-	// mov off32(%rdi), %x86reg
+	// mov off(%rdi), %x86reg
 	emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
 	emit8(0x8B);
-	emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
+	int32_t off = offsetof(Hart, pc) - hartPtrBias;
+	if (int8_t(off) == off) {
+		emit8(0x40 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
+		emitRaw<int8_t>(off);
+	} else {
+		emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
+		emitRaw<int32_t>(off);
+	}
 }
 
 void X86JIT::emitStorePC(X86Reg x86Reg)
 {
-	// mov %x86reg, off32(%rdi)
+	// mov %x86reg, off(%rdi)
 	emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
 	emit8(0x89);
-	emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
+	int32_t off = offsetof(Hart, pc) - hartPtrBias;
+	if (int8_t(off) == off) {
+		emit8(0x40 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
+		emitRaw<int8_t>(off);
+	} else {
+		emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
+		emitRaw<int32_t>(off);
+	}
 }
 
 void X86JIT::emitAddPC(int32_t value)
@@ -240,22 +252,25 @@ void X86JIT::emitAddPC(int32_t value)
 	if (value == 0)
 		return;
 
-	if (int8_t(value) == value) {
-		// addq $value8, off32(%rdi)
-		emitREX(true, false, false, regREXBit(hartPtrReg));
-		emit8(0x83);
+	int32_t pcOff = offsetof(Hart, pc) - hartPtrBias;
+	bool imm8bit = int8_t(value) == value;
+
+	// addq $value, off(%rdi)
+	emitREX(true, false, false, regREXBit(hartPtrReg));
+	emit8(imm8bit ? 0x83 : 0x81);
+
+	if (int8_t(pcOff) == pcOff) {
+		emit8(0x40 | regLow3Bits(hartPtrReg));
+		emitRaw<int8_t>(pcOff);
+	} else {
 		emit8(0x80 | regLow3Bits(hartPtrReg));
-		emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
-		emitRaw<int8_t>(value);
-		return;
+		emitRaw<int32_t>(pcOff);
 	}
 
-	// addq $value32, off32(%rdi)
-	emitREX(true, false, false, regREXBit(hartPtrReg));
-	emit8(0x81);
-	emit8(0x80 | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
-	emitRaw<int32_t>(value);
+	if (imm8bit)
+		emitRaw<int8_t>(value);
+	else
+		emitRaw<int32_t>(value);
 }
 
 template<typename T>
