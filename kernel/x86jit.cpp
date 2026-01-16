@@ -40,11 +40,20 @@ void X86JIT::init()
 	codeRegionCurrent = codeRegionStart;
 }
 
+// Sentinel value to indicate that a translation failed.
+static uint8_t * const CODE_TRANSLATION_FAILED = (uint8_t*) 1;
+
 bool X86JIT::tryJit(Hart *hart, PhysAddr pcPhys)
 {
 	// Not already translated?
 	uint8_t *code;
+
 	if (!codeHashMap.lookup(pcPhys, &code)) {
+		codeHashMap.insert(pcPhys, nullptr);
+		return false;
+	} else if(code == CODE_TRANSLATION_FAILED) {
+		return false;
+	} else if(code == nullptr) {
 		// Make space for at least one translation
 		if (codeRegionEnd - codeRegionCurrent < MIN_TRANSLATION_SPACE) {
 			printf("JIT code region full, resetting.\n");
@@ -53,8 +62,10 @@ bool X86JIT::tryJit(Hart *hart, PhysAddr pcPhys)
 
 		// Try to make a translation
 		code = codeRegionCurrent;
-		if (!translate(pcPhys))
+		if (!translate(pcPhys)) {
+			codeHashMap.insert(pcPhys, CODE_TRANSLATION_FAILED);
 			return false;
+		}
 
 		codeHashMap.insert(pcPhys, code);
 	}
@@ -673,7 +684,7 @@ void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
 		jumpDestination = thisTranslationStartCode; // Start of this translation
 	else if ((newPcPhys >> 12) != (thisTranslationStartPC >> 12))
 		jumpDestination = nullptr; // Different page
-	else if (uint8_t *translatedDest; codeHashMap.lookup(newPcPhys, &translatedDest))
+	else if (uint8_t *translatedDest; codeHashMap.lookup(newPcPhys, &translatedDest) && translatedDest > CODE_TRANSLATION_FAILED)
 		jumpDestination = translatedDest;
 
 	if (jumpDestination != nullptr) {
@@ -2193,6 +2204,13 @@ void X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::insert(Key 
 {
 	auto bucketNum = bucketForKey(key);
 	auto &bucket = buckets[bucketNum];
+
+	for (size_t i = 0; i < bucket.numEntries; ++i)
+		if (bucket.entries[i].key == key) {
+			bucket.entries[i].result = result;
+			return;
+		}
+
 	// TODO: Better strategy
 	if (bucket.numEntries == entriesPerBucket)
 		bucket.numEntries = 0;
