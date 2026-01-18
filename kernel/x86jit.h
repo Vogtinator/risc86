@@ -110,7 +110,8 @@ private:
 	void emitStoreRVFReg64(XMMReg xmmReg, RVReg rvReg);
 	void emitNANBoxXMMReg(XMMReg xmmReg); // Set high 32bits to 0xFFFFFFFF
 	// High-level
-	static const XMMReg xmmDynRegFirst = XMMReg::XMM8, xmmDynRegLast = XMMReg::XMM15;
+	// TODO: What's the right number?
+	static const XMMReg xmmDynRegFirst = XMMReg::XMM11, xmmDynRegLast = XMMReg::XMM15;
 	// Flushes RV FP reg to struct Hart, does not change reg map.
 	void emitFlushRVFReg(RVReg rvReg);
 	// Changes reg map accordingly.
