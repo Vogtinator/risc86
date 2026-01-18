@@ -1282,22 +1282,22 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		emit8(0xf8);
 
 		if (isDouble) {
-			// mov (%rdx), %eax
-			emit8(0x8B); emit8(0x02);
-		} else {
 			// mov (%rdx), %rax
 			emit8(0x48); emit8(0x8B); emit8(0x02);
+		} else {
+			// mov (%rdx), %eax
+			emit8(0x8B); emit8(0x02);
 		}
 
 		emitLeaveOnMemFault(addr, Hart::SCAUSE_LOAD_PAGE_FAULT);
 
-		XMMReg rdX86 = mapRVFRegForWrite(rd, !isDouble);
+		XMMReg rdXMM = mapRVFRegForWrite(rd, !isDouble);
 
 		// movd %eax, %rdXMM or movq %rax, %rdXMM
 		emit8(0x66);
-		emitREX(isDouble, regREXBit(rdX86), false, false);
+		emitREX(isDouble, regREXBit(rdXMM), false, false);
 		emit8(0x0f); emit8(0x6e);
-		emit8(0xC0 | (regLow3Bits(rdX86) << 3));
+		emit8(0xC0 | (regLow3Bits(rdXMM) << 3));
 
 		return true;
 	}
