@@ -48,7 +48,8 @@ private:
 	static inline uint8_t regLow3Bits(X86Reg r) { return static_cast<uint8_t>(r) & 0b0111; }
 
 	enum class XMMReg {
-		XMM0=0, XMM8=8, XMM15=15,
+		XMM0=0,
+		XMM8=8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15,
 	};
 	static inline constexpr bool regREXBit(XMMReg r) { return static_cast<uint8_t>(r) & 0b1000; }
 	static inline uint8_t regLow3Bits(XMMReg r) { return static_cast<uint8_t>(r) & 0b0111; }
