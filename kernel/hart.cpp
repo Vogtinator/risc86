@@ -562,9 +562,19 @@ void Hart::setCSR(uint16_t csr, uint64_t value)
 		break;
 	} case 0x180u:
 		if ((value >> 60) == 0 || (value >> 60) == 8) { // Only bare or Sv39
+			// Should not be necessary, but Linux does something weird:
+			// In relocate_enable_mmu, it does sfence.vma before writing SATP,
+			// and expects a page fault either in the next few instructions or
+			// after the next sfence.vma. The JIT uses the old mapping but the
+			// iTLB here uses the new one, so it faults at the next csr instruction
+			// which breaks the expected flow.
+			if ((value >> 60) != (this->satp >> 60)) {
+				getPerCPU()->x86mmu.resetContext();
+				getPerCPU()->x86jit.resetVirtMap();
+			}
+
 			this->satp = value & ~(0xFFFFul << 44); // Mask off ASID
-			getPerCPU()->x86mmu.resetContext();
-			getPerCPU()->x86jit.resetVirtMap();
+
 		} else
 			panic("Unsupported SATP value %lx", value);
 		return;
