@@ -422,29 +422,116 @@ X86JIT::X86Reg X86JIT::mapRVRegForReadWrite32(RVReg rvReg)
 	return ret;
 }
 
+void X86JIT::emitLoadRVFReg(RVReg rvReg, XMMReg xmmReg)
+{
+	int32_t off = offsetof(Hart, fregs[rvReg]) - hartPtrBias;
+
+	// movsd off32(%rdi), %xmmreg
+	emit8(0xF2);
+	emitREX(false, regREXBit(xmmReg), false, regREXBit(hartPtrReg));
+	emit8(0x0F); emit8(0x10);
+	emit8(0x80 | (regLow3Bits(xmmReg) << 3) | regLow3Bits(hartPtrReg));
+	emitRaw<int32_t>(off);
+}
+
+void X86JIT::emitStoreRVFReg64(XMMReg xmmReg, RVReg rvReg)
+{
+	int32_t off = offsetof(Hart, fregs[rvReg]) - hartPtrBias;
+
+	// movsd %xmmreg, off32(%rdi)
+	emit8(0xF2);
+	emitREX(false, regREXBit(xmmReg), false, regREXBit(hartPtrReg));
+	emit8(0x0F); emit8(0x11);
+	emit8(0x80 | (regLow3Bits(xmmReg) << 3) | regLow3Bits(hartPtrReg));
+	emitRaw<int32_t>(off);
+}
+
+void X86JIT::emitNANBoxXMMReg(XMMReg xmmReg)
+{
+	int32_t off = offsetof(Hart, nanbox) - hartPtrBias;
+
+	// orps off32(%rdi), %xmmreg
+	emitREX(false, regREXBit(xmmReg), false, regREXBit(hartPtrReg));
+	emit8(0x0F); emit8(0x56);
+	emit8(0x80 | (regLow3Bits(xmmReg) << 3) | regLow3Bits(hartPtrReg));
+	emitRaw<int32_t>(off);
+}
+
 void X86JIT::emitFlushRVFReg(RVReg rvReg)
 {
+	if (!rvFRegsToXMM[rvReg].dirty)
+		return;
 
+	if (rvFRegsToXMM[rvReg].bits32)
+		emitNANBoxXMMReg(rvFRegsToXMM[rvReg].x86reg);
+
+	emitStoreRVFReg64(rvFRegsToXMM[rvReg].x86reg, rvReg);
 }
 
 void X86JIT::markRVFRegFlushed(RVReg rvReg)
 {
-
+	rvRegsToX86[rvReg].dirty = false;
+	rvRegsToX86[rvReg].bits32 = false; // Got NaN-boxed as side effect
 }
 
 X86JIT::XMMReg X86JIT::mapRVFRegForWrite(RVReg rvReg, bool is32bits)
 {
+	auto &mapEntry = rvFRegsToXMM[rvReg];
+	if (mapEntry.x86reg == NotMappedXMM) {
+		mapEntry.x86reg = findFreeXMMDynReg();
+	}
 
+	mapEntry.bits32 = is32bits;
+	mapEntry.dirty = true;
+	mapEntry.usedAtPC = thisTranslationCurrentPC;
+	return mapEntry.x86reg;
 }
 
 X86JIT::XMMReg X86JIT::mapRVFRegForRead(RVReg rvReg, bool bits32Ok)
 {
+	auto &mapEntry = rvFRegsToXMM[rvReg];
+	if (mapEntry.x86reg == NotMappedXMM) {
+		mapEntry.x86reg = findFreeXMMDynReg();
+		emitLoadRVFReg(rvReg, mapEntry.x86reg);
+	} else if (mapEntry.bits32 && !bits32Ok) {
+		emitNANBoxXMMReg(rvFRegsToXMM[rvReg].x86reg);
+		mapEntry.bits32 = false;
+	}
 
+	mapEntry.usedAtPC = thisTranslationCurrentPC;
+	return mapEntry.x86reg;
 }
 
 X86JIT::XMMReg X86JIT::findFreeXMMDynReg()
 {
+	// Try to find a free register
+	for (XMMReg r = xmmDynRegFirst; r <= xmmDynRegLast; r = XMMReg(uint8_t(r) + 1)) {
+		bool mapped = false;
+		for (int rv = 0; rv < 32; ++rv) {
+			if (rvFRegsToXMM[rv].x86reg == r) {
+				mapped = true;
+				break;
+			}
+		}
 
+		if (!mapped)
+			return r;
+	}
+
+	// Nothing found - flush the first mapping not used by this instruction
+	for (int rv = 0; rv < 32; ++rv) {
+		if (rvFRegsToXMM[rv].x86reg == NotMappedXMM
+		    || rvFRegsToXMM[rv].usedAtPC == thisTranslationCurrentPC)
+			continue;
+
+		auto ret = rvFRegsToXMM[rv].x86reg;
+		emitFlushRVFReg(rv);
+		markRVRegFlushed(rv);
+		rvFRegsToXMM[rv].x86reg = NotMappedXMM;
+		return ret;
+	}
+
+	panic("All dynamic regs in use by one instruction?");
 }
 
 void X86JIT::emitFlushRegsToHart()
