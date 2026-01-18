@@ -81,12 +81,16 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	static_assert(hartPtrReg == X86Reg::RDI); // Hardcoded below
 	static_assert(x86DynRegFirst == X86Reg::R8); // Hardcoded below
 	static_assert(x86DynRegLast == X86Reg::R15); // Hardcoded below
+	static_assert(xmmDynRegFirst == XMMReg::XMM8); // Hardcoded below
+	static_assert(xmmDynRegLast == XMMReg::XMM15); // Hardcoded below
 	asm("call %A[code]"
 	    : "=a" (ret)
 	    : [code] "r" (code), "D" (uintptr_t(hart) + hartPtrBias)
 	    : "memory", "cc",
-	      "rcx", "rdx", "rbx",
-	      "r8", "r9", "r10", "r11", /*"r12",*/ "r13", "r14", "r15");
+	      "rcx", "rdx", // Temporaries
+	      "r8", "r9", "r10", "r11", /*"r12",*/ "r13", "r14", "r15", // x86DynReg
+	      "xmm0", // Temporaries
+	      "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"); // xmmDynReg
 
 	return ret;
 }
@@ -418,10 +422,40 @@ X86JIT::X86Reg X86JIT::mapRVRegForReadWrite32(RVReg rvReg)
 	return ret;
 }
 
+void X86JIT::emitFlushRVFReg(RVReg rvReg)
+{
+
+}
+
+void X86JIT::markRVFRegFlushed(RVReg rvReg)
+{
+
+}
+
+X86JIT::XMMReg X86JIT::mapRVFRegForWrite(RVReg rvReg, bool is32bits)
+{
+
+}
+
+X86JIT::XMMReg X86JIT::mapRVFRegForRead(RVReg rvReg, bool bits32Ok)
+{
+
+}
+
+X86JIT::XMMReg X86JIT::findFreeXMMDynReg()
+{
+
+}
+
 void X86JIT::emitFlushRegsToHart()
 {
 	for (int rv = 0; rv < 32; ++rv)
 		emitFlushRVReg(rv);
+
+	// Any writes to FP regs set FS dirty. If it's unset, no flushing is necessary.
+	if (thisTranslationFSKnownDirty)
+		for (int rv = 0; rv < 32; ++rv)
+			emitFlushRVFReg(rv);
 }
 
 void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
@@ -1590,6 +1624,8 @@ bool X86JIT::translate(PhysAddr entry)
 	thisTranslationStartCode = codeRegionCurrent;
 	lastHartPC = entry;
 	jumpsAway = false;
+	thisTranslationFSKnownOn = false;
+	thisTranslationFSKnownDirty = false;
 
 	uint8_t *lastInstructionEnd;
 
@@ -1640,6 +1676,7 @@ bool X86JIT::translate(PhysAddr entry)
 
 	// Reset register mappings
 	__builtin_memset(rvRegsToX86, 0, sizeof(rvRegsToX86));
+	__builtin_memset(rvFRegsToXMM, 0, sizeof(rvFRegsToXMM));
 
 	return true;
 }
