@@ -1519,6 +1519,47 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		emitLeaveOnMemFault(addr, Hart::SCAUSE_STORE_PAGE_FAULT);
 		return true;
 	}
+	case 0x27u: // FP store
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		int32_t imm = ((int32_t(inst) >> 25u) << 5u) | ((inst >> 7u) & 0x1Fu);
+
+		if (funct3 != 0b0010 && funct3 != 0b0011)
+			return false;
+
+		bool isDouble = funct3 == 0b011;
+
+		emitFaultOnFSOff(addr);
+
+		// %rdx = rs1 + imm
+		X86Reg rs1X86 = mapRVRegForRead64(rs1);
+		emitMovRegReg(rs1X86, X86Reg::RDX);
+		emitAddImmediate(X86Reg::RDX, imm);
+
+		// %rax = %rs2xmm
+		XMMReg rs2XMM = mapRVFRegForRead(rs2, !isDouble);
+		// movd %rs2XMM, %eax or movq %rs2Xmm, %rax
+		emit8(0x66);
+		emitREX(isDouble, regREXBit(rs2XMM), false, false);
+		emit8(0x0f); emit8(0x7e);
+		emit8(0xC0 | (regLow3Bits(rs2XMM) << 3));
+
+		// clc
+		emit8(0xf8);
+
+		if (isDouble) {
+			// mov %rax, (%rdx)
+			emit8(0x48); emit8(0x89); emit8(0x02);
+		} else {
+			// mov %eax, (%rdx)
+			emit8(0x89); emit8(0x02);
+		}
+
+		emitLeaveOnMemFault(addr, Hart::SCAUSE_STORE_PAGE_FAULT);
+		return true;
+	}
 	case 0x33u: // integer register
 	case 0x3Bu: // integer register (RV64)
 	{
