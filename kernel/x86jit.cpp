@@ -85,7 +85,7 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	static_assert(hartPtrReg == X86Reg::RDI); // Hardcoded below
 	static_assert(x86DynRegFirst == X86Reg::R8); // Hardcoded below
 	static_assert(x86DynRegLast == X86Reg::R15); // Hardcoded below
-	static_assert(xmmDynRegFirst == XMMReg::XMM8); // Hardcoded below
+	static_assert(xmmDynRegFirst == XMMReg::XMM11); // Hardcoded below
 	static_assert(xmmDynRegLast == XMMReg::XMM15); // Hardcoded below
 	asm("call %A[code]"
 	    : "=a" (ret)
@@ -94,7 +94,7 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	      "rcx", "rdx", // Temporaries
 	      "r8", "r9", "r10", "r11", /*"r12",*/ "r13", "r14", "r15", // x86DynReg
 	      "xmm0", // Temporaries
-	      "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"); // xmmDynReg
+	      /*"xmm8", "xmm9", "xmm10",*/ "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"); // xmmDynReg
 
 	return ret;
 }
@@ -610,6 +610,13 @@ void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
 
 void X86JIT::emitLeaveOnMemFault(PhysAddr curPC, uint32_t scause)
 {
+	// Hack: Doing that conditionally breaks jnc off8
+	if (thisTranslationFSKnownDirty)
+		for (int rv = 0; rv < 32; ++rv) {
+			emitFlushRVFReg(rv);
+			markRVFRegFlushed(rv);
+		}
+
 	// If no fault (carry clear), skip fault handling
 	emit8(0x73); // jnc off8
 	uint8_t *jmpOffPtr = codeRegionCurrent;
