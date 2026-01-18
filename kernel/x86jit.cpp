@@ -473,8 +473,8 @@ void X86JIT::emitFlushRVFReg(RVReg rvReg)
 
 void X86JIT::markRVFRegFlushed(RVReg rvReg)
 {
-	rvRegsToX86[rvReg].dirty = false;
-	rvRegsToX86[rvReg].bits32 = false; // Got NaN-boxed as side effect
+	rvFRegsToXMM[rvReg].dirty = false;
+	rvFRegsToXMM[rvReg].bits32 = false; // Got NaN-boxed as side effect
 }
 
 X86JIT::XMMReg X86JIT::mapRVFRegForWrite(RVReg rvReg, bool is32bits)
@@ -529,7 +529,7 @@ X86JIT::XMMReg X86JIT::findFreeXMMDynReg()
 
 		auto ret = rvFRegsToXMM[rv].x86reg;
 		emitFlushRVFReg(rv);
-		markRVRegFlushed(rv);
+		markRVFRegFlushed(rv);
 		rvFRegsToXMM[rv].x86reg = NotMappedXMM;
 		return ret;
 	}
@@ -1200,6 +1200,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		bool isDouble = funct3 == 0b011;
 
 		emitFaultOnFSOff(addr);
+		emitMarkFSDirty();
 
 		// %rdx = rs1 + imm
 		X86Reg rs1X86 = mapRVRegForRead64(rs1);
@@ -1219,9 +1220,9 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 
 		emitLeaveOnMemFault(addr, Hart::SCAUSE_LOAD_PAGE_FAULT);
 
-		XMMReg rdX86 = mapRVFRegForWrite(rd, isDouble);
+		XMMReg rdX86 = mapRVFRegForWrite(rd, !isDouble);
 
-		// movd %eax, %rdXMM or movq %rax %rdXMM
+		// movd %eax, %rdXMM or movq %rax, %rdXMM
 		emit8(0x66);
 		emitREX(isDouble, regREXBit(rdX86), false, false);
 		emit8(0x0f); emit8(0x6e);
