@@ -44,6 +44,10 @@ private:
 		RAX=0, RCX, RDX, RBX, RSP, RBP, RSI, RDI,
 		R8, R9, R10, R11, R12, R13, R14, R15,
 	};
+	enum class XMMReg : uint8_t {
+		XMM0=0, XMM8=8, XMM15=15,
+	};
+
 	static inline constexpr bool regREXBit(X86Reg r) { return static_cast<uint8_t>(r) & 0b1000; }
 	static inline uint8_t regLow3Bits(X86Reg r) { return static_cast<uint8_t>(r) & 0b0111; }
 
@@ -80,15 +84,41 @@ private:
 	// Changes reg map according to what emitFlushRVReg did.
 	void markRVRegFlushed(RVReg rvReg);
 	X86Reg findFreeDynReg();
+	// Make rvReg accessible as a x86 register for reading.
+	// Set bits32Ok if only the low 32 bits are used.
 	X86Reg mapRVRegForRead(RVReg rvReg, bool bits32Ok);
 	X86Reg mapRVRegForRead64(RVReg rvReg);
 	X86Reg mapRVRegForRead32(RVReg rvReg);
+	// Like mapRVRegForRead, but for writing.
+	// If is32bits is set, the value will be sign-extended from 32bit to 64bit when needed.
+	// Note: From this point on it assumes that the x86 register has valid contents,
+	// so make sure that if the register is read, mapRVRegForRead is called before.
+	// Rule of thumb: Call mapRVRegForRead before any mapRVRegForWrite.
+	// mapRVRegForReadWrite* does that for you.
 	X86Reg mapRVRegForWrite(RVReg rvReg, bool is32bits);
 	X86Reg mapRVRegForWrite32(RVReg rvReg);
 	X86Reg mapRVRegForWrite64(RVReg rvReg);
 	X86Reg mapRVRegForReadWrite64(RVReg rvReg);
 	X86Reg mapRVRegForReadWrite32(RVReg rvReg);
-	// Flush all regs to struct Hart, does not chage reg map.
+
+	// Same for FP regs
+	static const XMMReg xmmDynRegFirst = XMMReg::XMM8, xmmDynRegLast = XMMReg::XMM15;
+	// Flushes RV FP reg to struct Hart, does not change reg map.
+	void emitFlushRVFReg(RVReg rvReg);
+	// Changes reg map accordingly.
+	void markRVFRegFlushed(RVReg rvReg);
+	XMMReg findFreeXMMDynReg();
+	// Make rvReg accessible as a XMM register for reading.
+	// Set bits32Ok if only the low 32 bits are used.
+	XMMReg mapRVFRegForRead(RVReg rvReg, bool bits32Ok);
+	// Like mapRVRegForRead, but for writing.
+	// Note: From this point on it assumes that the x86 register has valid contents,
+	// so make sure that if the register is read, mapRVRegForRead is called before.
+	// Rule of thumb: Call mapRVRegForRead before any mapRVRegForWrite.
+	// mapRVRegForReadWrite* does that for you.
+	XMMReg mapRVFRegForWrite(RVReg rvReg, bool is32bits);
+
+	// Flush all mapped registers marked dirty back into Hart::(f)regs, does not chage reg map.
 	void emitFlushRegsToHart();
 	// Flush all regs to struct Hart and update hartPCReg, changes reg map.
 	void emitFlushRegsToHartAndMark(PhysAddr curPC);
@@ -97,10 +127,16 @@ private:
 	// Tries to loop back to the beginning of this translation if possible.
 	void emitPCRelativeJump(PhysAddr pcPhys, int32_t imm);
 
+	// Helpers for FP state management
+	void emitFaultOnFSOff(PhysAddr curPC);
+	void emitMarkFSDirty();
+
 	// State during generation of translations.
 	PhysAddr thisTranslationStartPC;
 	uint8_t *thisTranslationStartCode;
 	PhysAddr thisTranslationCurrentPC;
+	// emitFaultOnFSOff and emitMarkFSDirty are only needed once per translation
+	bool thisTranslationFSKnownOn, thisTranslationFSKnownDirty;
 
 	// Some instruction need the correct value of hart->pc.
 	// This stores the value hart->pc currently has, so that the needed diff can be applied.
@@ -119,7 +155,7 @@ private:
 	// Mapped, dirty (was written to), only lower 32bits
 	// Mapped, dirty (was written to), all 64 bits
 	const X86Reg NotMapped = X86Reg::RAX;
-	struct {
+	template <typename T> struct RegMap {
 		// gpr number. 0 (RAX is ever mapped) means not mapped.
 		X86Reg x86reg;
 		// The latest address that used this mapping.
@@ -129,7 +165,10 @@ private:
 		bool dirty;
 		// Set if the lower 32 bits have been written to but not sign extended.
 		bool bits32;
-	} rvRegsToX86[32];
+	};
+
+	RegMap<X86Reg> rvRegsToX86[32];
+	RegMap<XMMReg> rvFRegsToXMM[32];
 
 	bool translateRVCInstruction(PhysAddr addr, uint16_t inst);
 	bool translateInstruction(PhysAddr addr, uint32_t inst);
