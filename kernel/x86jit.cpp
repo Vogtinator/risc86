@@ -1308,7 +1308,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			return true;
 		case 0x6u: // ori
 			emitMovRegReg(rs1X86, rdX86);
-			// xor imm32, %rdX86
+			// or imm32, %rdX86
 			emitREX(true, false, false, regREXBit(rdX86));
 			emit8(0x81);
 			emit8(0xC0 | (1 << 3) | regLow3Bits(rdX86));
