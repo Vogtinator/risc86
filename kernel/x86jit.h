@@ -63,7 +63,7 @@ private:
 	void emitAddPC(int32_t value);
 	void emitStoreRVReg64(X86Reg x86Reg, RVReg rvReg);
 	void emitSExtX86Reg(X86Reg x86Reg); // 32->64 sign extension
-	void emitRet(uint32_t retVal);
+	void emitRet();
 
 	// High-level helpers for RV register management
 	// Use %r8-%r15, but skip %r12 as it has a different meaning in ModRM...
@@ -82,13 +82,11 @@ private:
 	X86Reg mapRVRegForReadWrite64(RVReg rvReg);
 	X86Reg mapRVRegForReadWrite32(RVReg rvReg);
 	void emitFlushRegsToHart();
+	void emitFlushRegsToHartAndMark(PhysAddr curPC);
 
 	// Emit jmp away to a new PC, leaving this translation.
 	// Tries to loop back to the beginning of this translation if possible.
 	void emitPCRelativeJump(PhysAddr pcPhys, int32_t imm);
-
-	// For load/store: If carry set, leave the translation with given scause.
-	void emitLeaveOnMemFault(PhysAddr curPC, uint32_t scause);
 
 	// State during generation of translations.
 	PhysAddr thisTranslationStartPC;

@@ -39,7 +39,13 @@ static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 	}
 
 	// Set the Carry flag on fault and advance, clear it otherwise
-	if (isFault) {
+	if (isFault && hart->inJit) {
+		hart->jitScause = isWrite ? Hart::SCAUSE_STORE_PAGE_FAULT : Hart::SCAUSE_LOAD_PAGE_FAULT;
+
+		uint64_t *stack = (uint64_t*) frame->sp;
+		frame->ip = stack[0];
+		frame->sp += sizeof(stack[0]);
+	} else if (isFault) {
 		// Find which instruction caused the fault to get its length.
 		// Proper decoding not needed here, the set of possible instructions
 		// is known.

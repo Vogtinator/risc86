@@ -114,6 +114,8 @@ struct Hart {
 	void dump();
 	void run();
 
+	bool inJit;
+	uint32_t jitScause;
 private:
 	friend class X86JIT;
 
