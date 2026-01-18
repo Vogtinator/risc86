@@ -746,6 +746,21 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		emit8(0xC0 | (regLow3Bits(rs2X86) << 3) | regLow3Bits(rdX86));
 
 		return true;
+	} else if ((inst & 0b111'1'11'000'10'000'11) == 0b100'1'11'000'00'000'01) { // c.addw/c.subw
+		bool isAdd = inst & (1 << 5);
+
+		uint32_t rs2 = ((inst >> 2) & 7) + 8,
+		        rd  = ((inst >> 7) & 7) + 8;
+
+		X86Reg rdX86 = mapRVRegForReadWrite32(rd),
+		       rs2X86 = mapRVRegForRead32(rs2);
+
+		// add/sub %rs2X86d, %rdX86d
+		emitREX(false, regREXBit(rs2X86), false, regREXBit(rdX86));
+		emit8(isAdd ? 0x01 : 0x29);
+		emit8(0xC0 | (regLow3Bits(rs2X86) << 3) | regLow3Bits(rdX86));
+
+		return true;
 	} else if ((inst & 0b111'1'00000'11111'11) == 0b100'0'00000'00000'10) { // c.jr (before c.mv)
 		uint32_t rs1 = (inst >> 7) & 0x1F;
 
