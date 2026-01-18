@@ -44,12 +44,14 @@ private:
 		RAX=0, RCX, RDX, RBX, RSP, RBP, RSI, RDI,
 		R8, R9, R10, R11, R12, R13, R14, R15,
 	};
-	enum class XMMReg : uint8_t {
-		XMM0=0, XMM8=8, XMM15=15,
-	};
-
 	static inline constexpr bool regREXBit(X86Reg r) { return static_cast<uint8_t>(r) & 0b1000; }
 	static inline uint8_t regLow3Bits(X86Reg r) { return static_cast<uint8_t>(r) & 0b0111; }
+
+	enum class XMMReg {
+		XMM0=0, XMM8=8, XMM15=15,
+	};
+	static inline constexpr bool regREXBit(XMMReg r) { return static_cast<uint8_t>(r) & 0b1000; }
+	static inline uint8_t regLow3Bits(XMMReg r) { return static_cast<uint8_t>(r) & 0b0111; }
 
 	using RVReg = uint8_t;
 
@@ -102,6 +104,11 @@ private:
 	X86Reg mapRVRegForReadWrite32(RVReg rvReg);
 
 	// Same for FP regs
+	// Low-level
+	void emitLoadRVFReg(RVReg rvReg, XMMReg xmmReg);
+	void emitStoreRVFReg64(XMMReg xmmReg, RVReg rvReg);
+	void emitNANBoxXMMReg(XMMReg xmmReg); // Set high 32bits to 0xFFFFFFFF
+	// High-level
 	static const XMMReg xmmDynRegFirst = XMMReg::XMM8, xmmDynRegLast = XMMReg::XMM15;
 	// Flushes RV FP reg to struct Hart, does not change reg map.
 	void emitFlushRVFReg(RVReg rvReg);
@@ -155,9 +162,10 @@ private:
 	// Mapped, dirty (was written to), only lower 32bits
 	// Mapped, dirty (was written to), all 64 bits
 	const X86Reg NotMapped = X86Reg::RAX;
+	const XMMReg NotMappedXMM = XMMReg::XMM0;
 	template <typename T> struct RegMap {
-		// gpr number. 0 (RAX is ever mapped) means not mapped.
-		X86Reg x86reg;
+		// gpr or xmm number. 0 (RAX and XMM0 are never mapped) means not mapped.
+		T x86reg;
 		// The latest address that used this mapping.
 		// Must not be freed if it equals the currently translated one.
 		PhysAddr usedAtPC;

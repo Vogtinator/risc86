@@ -116,6 +116,8 @@ struct Hart {
 
 private:
 	friend class X86JIT;
+	// TODO: Put this into X86JIT and add it here
+	const uint64_t nanbox = ~0ul << 32;
 
 	void handleInterrupt(uint64_t cause, uint64_t stval);
 	void handlePendingInterrupts();
