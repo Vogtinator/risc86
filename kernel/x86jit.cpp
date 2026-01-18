@@ -526,6 +526,12 @@ void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
 
 void X86JIT::emitLeaveOnMemFault(PhysAddr curPC, uint32_t scause)
 {
+	// Important: Start at 1 here, doing it for 0 breaks it
+	for (int rv = 1; rv < 32; ++rv) {
+		emitFlushRVReg(rv);
+		markRVRegFlushed(rv);
+	}
+
 	// If no fault (carry clear), skip fault handling
 	emit8(0x73); // jnc off8
 	uint8_t *jmpOffPtr = codeRegionCurrent;
