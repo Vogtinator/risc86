@@ -60,8 +60,12 @@ bool X86JIT::tryJit(Hart *hart, PhysAddr pcPhys)
 	uint32_t scause = jumpToCode(hart, code);
 
 	if (scause != 0) { // Fault?
-		// stval already set by the page fault handler
-		hart->handleInterrupt(scause, hart->stval);
+		if (scause == Hart::SCAUSE_LOAD_PAGE_FAULT || scause == Hart::SCAUSE_STORE_PAGE_FAULT)
+			hart->handleInterrupt(scause, hart->stval); // stval already set by the page fault handler
+		else if (scause == Hart::SCAUSE_ILLEGAL_INSTRUCTION)
+			hart->handleInterrupt(scause, 0); // TODO: Write hart->stval = inst from JIT code?
+		else
+			panic("Unexpected return value from translated code");
 	}
 
 	return true;
@@ -616,6 +620,61 @@ void X86JIT::emitLeaveOnMemFault(PhysAddr curPC, uint32_t scause)
 		panic("jmp offset too big");
 
 	*jmpOffPtr = int8_t(jmpOff);
+}
+
+void X86JIT::emitFaultOnFSOff(PhysAddr curPC)
+{
+	if (thisTranslationFSKnownOn)
+		return;
+
+	// TODO: Do it unconditionally and also mark them flushed
+	// emitFlushRegsToHart();
+
+	int32_t off = offsetof(Hart, sstatus) - hartPtrBias;
+
+	// testl $SSTATUS_FS_MASK, off32(%rdi)
+	static_assert(!regREXBit(hartPtrReg));
+	emit8(0xF7);
+	emit8(0x80 | (0 << 3) | regLow3Bits(hartPtrReg));
+	emitRaw<int32_t>(off);
+	emitRaw<uint32_t>(SSTATUS_FS_MASK);
+
+	// If fs is on (zero flag unset), skip fault handling
+	emit8(0x75); // jnz off8
+	uint8_t *jmpOffPtr = codeRegionCurrent;
+	emit8(0); // off8 for jmp, will be adjusted below
+
+	// Fault handling: Flush regs and return
+	emitAddPC(curPC - lastHartPC);
+	// Leave translation
+	emitFlushRegsToHart();
+
+	emitRet(Hart::SCAUSE_ILLEGAL_INSTRUCTION);
+
+	int jmpOff = codeRegionCurrent - jmpOffPtr - 1;
+	if (jmpOff < INT8_MIN || jmpOff >= INT8_MAX)
+		panic("jmp offset too big");
+
+	*jmpOffPtr = int8_t(jmpOff);
+
+	thisTranslationFSKnownOn = true;
+}
+
+void X86JIT::emitMarkFSDirty()
+{
+	if (thisTranslationFSKnownDirty)
+		return;
+
+	int32_t off = offsetof(Hart, sstatus) - hartPtrBias;
+
+	// or $SSTATUS_FS_MASK, off32(%rdi)
+	static_assert(!regREXBit(hartPtrReg));
+	emit8(0x81);
+	emit8(0x80 | (1 << 3) | regLow3Bits(hartPtrReg));
+	emitRaw<int32_t>(off);
+	emitRaw<uint32_t>(SSTATUS_FS_MASK);
+
+	thisTranslationFSKnownDirty = true;
 }
 
 void X86JIT::emitUpdateHartPC(PhysAddr curPC)
@@ -1190,6 +1249,48 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		default:
 			panic("Unknown load instruction");
 		}
+
+		return true;
+	}
+	case 0x07u: // FP load
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		int32_t imm = int32_t(inst) >> 20u;
+
+		if (funct3 != 0b0010 && funct3 != 0b0011)
+			return false;
+
+		bool isDouble = funct3 == 0b011;
+
+		emitFaultOnFSOff(addr);
+
+		// %rdx = rs1 + imm
+		X86Reg rs1X86 = mapRVRegForRead64(rs1);
+		emitMovRegReg(rs1X86, X86Reg::RDX);
+		emitAddImmediate(X86Reg::RDX, imm);
+
+		// clc
+		emit8(0xf8);
+
+		if (isDouble) {
+			// mov (%rdx), %eax
+			emit8(0x8B); emit8(0x02);
+		} else {
+			// mov (%rdx), %rax
+			emit8(0x48); emit8(0x8B); emit8(0x02);
+		}
+
+		emitLeaveOnMemFault(addr, Hart::SCAUSE_LOAD_PAGE_FAULT);
+
+		XMMReg rdX86 = mapRVFRegForWrite(rd, isDouble);
+
+		// movd %eax, %rdXMM or movq %rax %rdXMM
+		emit8(0x66);
+		emitREX(isDouble, regREXBit(rdX86), false, false);
+		emit8(0x0f); emit8(0x6e);
+		emit8(0xC0 | (regLow3Bits(rdX86) << 3));
 
 		return true;
 	}
