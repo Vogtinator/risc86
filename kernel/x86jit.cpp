@@ -479,6 +479,9 @@ void X86JIT::markRVFRegFlushed(RVReg rvReg)
 
 X86JIT::XMMReg X86JIT::mapRVFRegForWrite(RVReg rvReg, bool is32bits)
 {
+	if (!thisTranslationFSKnownDirty)
+		panic("Trying to write to FP reg with FS non-dirty");
+
 	auto &mapEntry = rvFRegsToXMM[rvReg];
 	if (mapEntry.x86reg == NotMappedXMM) {
 		mapEntry.x86reg = findFreeXMMDynReg();
@@ -492,6 +495,9 @@ X86JIT::XMMReg X86JIT::mapRVFRegForWrite(RVReg rvReg, bool is32bits)
 
 X86JIT::XMMReg X86JIT::mapRVFRegForRead(RVReg rvReg, bool bits32Ok)
 {
+	if (!thisTranslationFSKnownOn)
+		panic("Trying to read from FP reg with FS off");
+
 	auto &mapEntry = rvFRegsToXMM[rvReg];
 	if (mapEntry.x86reg == NotMappedXMM) {
 		mapEntry.x86reg = findFreeXMMDynReg();
