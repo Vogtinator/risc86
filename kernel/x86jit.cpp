@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "x86jit.h"
+#include "percpu.h"
 
 /* How the JIT works:
  * In JIT generated code, %rdi points to the current struct Hart,
@@ -102,7 +103,7 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	static_assert(hartPtrReg == X86Reg::RDI); // Hardcoded below
 	static_assert(x86DynRegFirst == X86Reg::R8); // Hardcoded below
 	static_assert(x86DynRegLast == X86Reg::R15); // Hardcoded below
-	static_assert(xmmDynRegFirst == XMMReg::XMM8); // Hardcoded below
+	static_assert(xmmDynRegFirst == XMMReg::XMM11); // Hardcoded below
 	static_assert(xmmDynRegLast == XMMReg::XMM15); // Hardcoded below
 	// +{r12} constraint not supported by clang
 	register uint64_t hart_pc asm("r12") = hart->pc;
@@ -113,7 +114,7 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	      "rax", "rcx", "rdx", "rbx", // Temporaries
 	      "r8", "r9", "r10", "r11", "r13", "r14", "r15", // x86DynReg
 	      "xmm0", // Temporaries
-	      "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"); // xmmDynReg
+	      /*"xmm8", "xmm9", "xmm10",*/ "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"); // xmmDynReg
 
 	hart->pc = hart_pc;
 
@@ -651,7 +652,12 @@ void X86JIT::emitFaultOnFSOff(PhysAddr curPC)
 	// Leave translation
 	emitFlushRegsToHart();
 
-	emitRet(Hart::SCAUSE_ILLEGAL_INSTRUCTION);
+	// TODO: mov $imm8, off32(%rdi)?
+	emitMovImmediate32(X86Reg::RAX, Hart::SCAUSE_ILLEGAL_INSTRUCTION);
+	int64_t scauseOff = offsetof(PerCpuState, x86jit.jitScause) - offsetof(PerCpuState, hart) - hartPtrBias;
+	if (scauseOff < INT32_MIN || scauseOff > INT32_MAX)
+		panic("Offset too big");
+	emitMovMem(hartPtrReg, scauseOff, X86Reg::RAX, false, sizeof(jitScause));
 
 	int jmpOff = codeRegionCurrent - jmpOffPtr - 1;
 	if (jmpOff < INT8_MIN || jmpOff >= INT8_MAX)
@@ -1213,8 +1219,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		emitMovRegReg(rs1X86, X86Reg::RDX);
 		emitAddImmediate(X86Reg::RDX, imm);
 
-		// clc
-		emit8(0xf8);
+		emitFlushRegsToHartAndMark(addr);
 
 		if (isDouble) {
 			// mov (%rdx), %rax
@@ -1223,8 +1228,6 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			// mov (%rdx), %eax
 			emit8(0x8B); emit8(0x02);
 		}
-
-		emitLeaveOnMemFault(addr, Hart::SCAUSE_LOAD_PAGE_FAULT);
 
 		XMMReg rdXMM = mapRVFRegForWrite(rd, !isDouble);
 
@@ -1444,8 +1447,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		emit8(0x0f); emit8(0x7e);
 		emit8(0xC0 | (regLow3Bits(rs2XMM) << 3));
 
-		// clc
-		emit8(0xf8);
+		emitFlushRegsToHartAndMark(addr);
 
 		if (isDouble) {
 			// mov %rax, (%rdx)
@@ -1454,8 +1456,6 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			// mov %eax, (%rdx)
 			emit8(0x89); emit8(0x02);
 		}
-
-		emitLeaveOnMemFault(addr, Hart::SCAUSE_STORE_PAGE_FAULT);
 		return true;
 	}
 	case 0x33u: // integer register
