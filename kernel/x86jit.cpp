@@ -886,6 +886,37 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 
 		emitLeaveOnMemFault(addr, Hart::SCAUSE_STORE_PAGE_FAULT);
 		return true;
+	} else if ((inst & 0b111'000000'00000'11) == 0b101'000000'00000'10) { // c.fsdsp
+		uint16_t imm53 = (inst >> 10) & 7,
+				imm86 = (inst >>  7) & 7;
+
+		uint16_t off = (imm86 << 6) | (imm53 << 3);
+
+		uint32_t rs2 = (inst >> 2) & 31;
+
+		emitFaultOnFSOff(addr);
+
+		// %rdx = x2 + imm
+		X86Reg spX86 = mapRVRegForRead64(2);
+		emitMovRegReg(spX86, X86Reg::RDX);
+		emitAddImmediate(X86Reg::RDX, off);
+
+		// %rax = %rs2xmm
+		XMMReg rs2XMM = mapRVFRegForRead(rs2, false);
+		// movq %rs2Xmm, %rax
+		emit8(0x66);
+		emitREX(true, regREXBit(rs2XMM), false, false);
+		emit8(0x0f); emit8(0x7e);
+		emit8(0xC0 | (regLow3Bits(rs2XMM) << 3));
+
+		// clc
+		emit8(0xf8);
+
+		// mov %rax, (%rdx)
+		emit8(0x48); emit8(0x89); emit8(0x02);
+
+		emitLeaveOnMemFault(addr, Hart::SCAUSE_STORE_PAGE_FAULT);
+		return true;
 	} else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'10) { // c.ldsp
 		uint16_t imm5  = (inst >> 12) & 1,
 		        imm43 = (inst >>  5) & 3,
@@ -913,6 +944,39 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 
 		X86Reg rdX86 = mapRVRegForWrite64(rd);
 		emitMovRegReg(X86Reg::RAX, rdX86);
+		return true;
+	} else if ((inst & 0b111'0'00000'00000'11) == 0b001'0'00000'00000'10) { // c.fldsp
+		uint16_t imm5  = (inst >> 12) & 1,
+				imm43 = (inst >>  5) & 3,
+				imm86 = (inst >>  2) & 7;
+
+		uint16_t off = (imm86 << 6) | (imm5 << 5) | (imm43 << 3);
+
+		uint32_t rd = (inst >> 7) & 31;
+
+		emitFaultOnFSOff(addr);
+		emitMarkFSDirty();
+
+		// %rdx = x2 + imm
+		X86Reg spX86 = mapRVRegForRead64(2);
+		emitMovRegReg(spX86, X86Reg::RDX);
+		emitAddImmediate(X86Reg::RDX, off);
+
+		// clc
+		emit8(0xf8);
+
+		// mov (%rdx), %rax
+		emit8(0x48); emit8(0x8B); emit8(0x02);
+
+		emitLeaveOnMemFault(addr, Hart::SCAUSE_LOAD_PAGE_FAULT);
+
+		XMMReg rdXMM = mapRVFRegForWrite(rd, false);
+
+		// movq %rax, %rdXMM
+		emit8(0x66);
+		emitREX(true, regREXBit(rdXMM), false, false);
+		emit8(0x0f); emit8(0x6e);
+		emit8(0xC0 | (regLow3Bits(rdXMM) << 3));
 		return true;
 	} else if ((inst & 0b111'1'11'000'00'000'11) == 0b100'0'11'000'00'000'01) { // c.sub/c.xor/c.or/c.and
 		uint32_t rs2 = ((inst >> 2) & 7) + 8,
@@ -1085,7 +1149,7 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 
 		X86Reg rs1X86 = mapRVRegForRead64(rs1);
 
-		// %rdx = rs1
+		// %rdx = rs1 + off
 		emitMovRegReg(rs1X86, X86Reg::RDX);
 		emitAddImmediate(X86Reg::RDX, off);
 
@@ -1099,6 +1163,39 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 
 		X86Reg rdX86 = mapRVRegForWrite64(rd);
 		emitMovRegReg(X86Reg::RAX, rdX86);
+		return true;
+	} else if ((inst & 0b111'000'000'00'000'11) == 0b001'000'000'00'000'00) { // c.fld
+		uint16_t imm53 = (inst >> 10) & 7,
+				imm76 = (inst >>  5) & 3;
+
+		uint16_t off = (imm76 << 6) | (imm53 << 3);
+
+		uint32_t rs1 = ((inst >> 7) & 7) + 8,
+				rd  = ((inst >> 2) & 7) + 8;
+
+		emitFaultOnFSOff(addr);
+		emitMarkFSDirty();
+
+		// %rdx = rs1 + off
+		X86Reg rs1X86 = mapRVRegForRead64(rs1);
+		emitMovRegReg(rs1X86, X86Reg::RDX);
+		emitAddImmediate(X86Reg::RDX, off);
+
+		// clc
+		emit8(0xf8);
+
+		// mov (%rdx), %rax
+		emit8(0x48); emit8(0x8B); emit8(0x02);
+
+		emitLeaveOnMemFault(addr, Hart::SCAUSE_LOAD_PAGE_FAULT);
+
+		XMMReg rdXMM = mapRVFRegForWrite(rd, false);
+
+		// movq %rax, %rdXMM
+		emit8(0x66);
+		emitREX(true, regREXBit(rdXMM), false, false);
+		emit8(0x0f); emit8(0x6e);
+		emit8(0xC0 | (regLow3Bits(rdXMM) << 3));
 		return true;
 	} else if ((inst & 0b111'000'000'00'000'11) == 0b111'000'000'00'000'00) { // c.sd
 		uint16_t imm53 = (inst >> 10) & 7,
@@ -1118,6 +1215,39 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 
 		// %rax = rs2
 		emitMovRegReg(rs2X86, X86Reg::RAX);
+
+		// clc
+		emit8(0xf8);
+
+		// mov %rax, (%rdx)
+		emit8(0x48); emit8(0x89); emit8(0x02);
+
+		emitLeaveOnMemFault(addr, Hart::SCAUSE_STORE_PAGE_FAULT);
+		return true;
+	} else if ((inst & 0b111'000'000'00'000'11) == 0b101'000'000'00'000'00) { // c.fsd
+		uint16_t imm53 = (inst >> 10) & 7,
+				imm76 = (inst >>  5) & 3;
+
+		uint16_t off = (imm76 << 6) | (imm53 << 3);
+
+		uint32_t rs1 = ((inst >> 7) & 7) + 8,
+				rs2 = ((inst >> 2) & 7) + 8;
+
+		emitFaultOnFSOff(addr);
+
+		X86Reg rs1X86 = mapRVRegForRead64(rs1);
+
+		// %rdx = rs1 + off
+		emitMovRegReg(rs1X86, X86Reg::RDX);
+		emitAddImmediate(X86Reg::RDX, off);
+
+		// %rax = %rs2xmm
+		XMMReg rs2XMM = mapRVFRegForRead(rs2, false);
+		// movq %rs2Xmm, %rax
+		emit8(0x66);
+		emitREX(true, regREXBit(rs2XMM), false, false);
+		emit8(0x0f); emit8(0x7e);
+		emit8(0xC0 | (regLow3Bits(rs2XMM) << 3));
 
 		// clc
 		emit8(0xf8);
