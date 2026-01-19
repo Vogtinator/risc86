@@ -40,6 +40,8 @@ static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 
 	// Set the Carry flag on fault and advance, clear it otherwise
 	if (isFault && hart->inJit) {
+		getPerCPU()->x86jit.adjustPCForFault(hart, frame->ip);
+
 		hart->jitScause = isWrite ? Hart::SCAUSE_STORE_PAGE_FAULT : Hart::SCAUSE_LOAD_PAGE_FAULT;
 
 		uint64_t *stack = (uint64_t*) frame->sp;

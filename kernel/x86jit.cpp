@@ -42,7 +42,8 @@ bool X86JIT::tryJit(Hart *hart, PhysAddr pcPhys)
 	uint8_t *code;
 	if (!codeHashMap.lookup(pcPhys, &code)) {
 		// Make space for at least one translation
-		if (codeRegionEnd - codeRegionCurrent < MIN_TRANSLATION_SPACE) {
+		if (codeRegionEnd - codeRegionCurrent < MIN_TRANSLATION_SPACE
+		    || unwindList.buckets[0].numEntries == unwindList.epb) {
 			printf("JIT code region full, resetting.\n");
 			reset();
 		}
@@ -71,6 +72,16 @@ void X86JIT::reset()
 
 	// Reset RV -> JIT code mappings
 	codeHashMap.clear();
+	unwindList.clear();
+}
+
+void X86JIT::adjustPCForFault(Hart *hart, uintptr_t ip)
+{
+	int32_t pcAddend;
+	if (!unwindList.lookup(ip, &pcAddend))
+		panic("No unwind entry for 0x%lx!", ip);
+
+	hart->pc += pcAddend;
 }
 
 uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
@@ -87,6 +98,8 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	    : "memory", "cc",
 	      "rcx", "rdx", "rbx",
 	      "r8", "r9", "r10", "r11", /*"r12",*/ "r13", "r14", "r15");
+
+	hart->inJit = false;
 
 	return hart->jitScause;
 }
@@ -419,13 +432,13 @@ void X86JIT::emitFlushRegsToHart()
 
 void X86JIT::emitFlushRegsToHartAndMark(PhysAddr curPC)
 {
-	emitUpdateHartPC(curPC);
-
 	// Important: No 0 here!!! Would unset dirty but leave it dirty!
 	for (int rv = 1; rv < 32; ++rv) {
 		emitFlushRVReg(rv);
 		markRVRegFlushed(rv);
 	}
+
+	unwindList.insert(uintptr_t(codeRegionCurrent), curPC - lastHartPC);
 }
 
 void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
@@ -660,8 +673,6 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 
 		uint32_t rs2 = (inst >> 2) & 31;
 
-		emitFlushRegsToHartAndMark(addr);
-
 		// %rdx = x2 + imm
 		X86Reg spX86 = mapRVRegForRead64(2);
 		emitMovRegReg(spX86, X86Reg::RDX);
@@ -670,6 +681,8 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		// %rax = rs2
 		X86Reg rs2X86 = mapRVRegForRead64(rs2);
 		emitMovRegReg(rs2X86, X86Reg::RAX);
+
+		emitFlushRegsToHartAndMark(addr);
 
 		// mov %rax, (%rdx)
 		emit8(0x48); emit8(0x89); emit8(0x02);
@@ -686,12 +699,12 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		if (rd == 0)
 			panic("Reserved instruction %x", inst);
 
-		emitFlushRegsToHartAndMark(addr);
-
 		// %rdx = x2 + imm
 		X86Reg spX86 = mapRVRegForRead64(2);
 		emitMovRegReg(spX86, X86Reg::RDX);
 		emitAddImmediate(X86Reg::RDX, off);
+
+		emitFlushRegsToHartAndMark(addr);
 
 		// mov (%rdx), %rax
 		emit8(0x48); emit8(0x8B); emit8(0x02);
@@ -809,13 +822,13 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		uint32_t rs1 = ((inst >> 7) & 7) + 8,
 		        rd  = ((inst >> 2) & 7) + 8;
 
-		emitFlushRegsToHartAndMark(addr);
-
 		X86Reg rs1X86 = mapRVRegForRead64(rs1);
 
 		// %rdx = rs1
 		emitMovRegReg(rs1X86, X86Reg::RDX);
 		emitAddImmediate(X86Reg::RDX, off);
+
+		emitFlushRegsToHartAndMark(addr);
 
 		// mov (%rdx), %eax
 		emit8(0x8B); emit8(0x02);
@@ -838,8 +851,6 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		uint32_t rs1 = ((inst >> 7) & 7) + 8,
 		        rs2 = ((inst >> 2) & 7) + 8;
 
-		emitFlushRegsToHartAndMark(addr);
-
 		X86Reg rs1X86 = mapRVRegForRead64(rs1),
 		       rs2X86 = mapRVRegForRead32(rs2);
 
@@ -850,8 +861,7 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		// %rax = rs2
 		emitMovRegReg(rs2X86, X86Reg::RAX);
 
-		// clc
-		emit8(0xf8);
+		emitFlushRegsToHartAndMark(addr);
 
 		// mov %eax, (%rdx)
 		emit8(0x89); emit8(0x02);
@@ -865,16 +875,13 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		uint32_t rs1 = ((inst >> 7) & 7) + 8,
 		        rd  = ((inst >> 2) & 7) + 8;
 
-		emitFlushRegsToHartAndMark(addr);
-
 		X86Reg rs1X86 = mapRVRegForRead64(rs1);
 
 		// %rdx = rs1
 		emitMovRegReg(rs1X86, X86Reg::RDX);
 		emitAddImmediate(X86Reg::RDX, off);
 
-		// clc
-		emit8(0xf8);
+		emitFlushRegsToHartAndMark(addr);
 
 		// mov (%rdx), %rax
 		emit8(0x48); emit8(0x8B); emit8(0x02);
@@ -891,8 +898,6 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		uint32_t rs1 = ((inst >> 7) & 7) + 8,
 		        rs2 = ((inst >> 2) & 7) + 8;
 
-		emitFlushRegsToHartAndMark(addr);
-
 		X86Reg rs1X86 = mapRVRegForRead64(rs1),
 		       rs2X86 = mapRVRegForRead64(rs2);
 
@@ -903,8 +908,7 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		// %rax = rs2
 		emitMovRegReg(rs2X86, X86Reg::RAX);
 
-		// clc
-		emit8(0xf8);
+		emitFlushRegsToHartAndMark(addr);
 
 		// mov %rax, (%rdx)
 		emit8(0x48); emit8(0x89); emit8(0x02);
@@ -1577,6 +1581,9 @@ bool X86JIT::translate(PhysAddr entry)
 		if (codeRegionEnd - codeRegionCurrent < MIN_TRANSLATION_SPACE)
 			break;
 
+		if (unwindList.buckets[0].numEntries == unwindList.epb)
+			break;
+
 		uint16_t inst16 = *phys_to_virt<uint16_t>(addr);
 		if ((inst16 & 0b11) == 0b11) { // 32bit instruction?
 			if ((addr & 0xFFF) > 0xFFC)
@@ -1619,6 +1626,10 @@ void X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::insert(Key 
 {
 	auto bucketNum = bucketForKey(key);
 	auto &bucket = buckets[bucketNum];
+
+	if (bucket.numEntries == entriesPerBucket && numBuckets == 1)
+		panic("FULL!");
+
 	// TODO: Better strategy
 	if (bucket.numEntries == entriesPerBucket)
 		bucket.numEntries = 0;

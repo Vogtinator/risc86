@@ -16,6 +16,8 @@ public:
 
 	// Discard all translations.
 	void reset();
+
+	void adjustPCForFault(Hart *hart, uintptr_t ip);
 private:
 	const size_t JIT_REGION_SIZE = 128*1024*1024; // 128 MiB
 	const int MIN_TRANSLATION_SPACE = 256;
@@ -134,7 +136,8 @@ private:
 		void insert(Key key, Result result);
 		bool lookup(Key key, Result *result);
 		void clear();
-	private:
+	//private:
+		static const auto epb = entriesPerBucket;
 		size_t bucketForKey(Key key);
 		struct Bucket {
 			struct Entry {
@@ -146,4 +149,6 @@ private:
 	};
 
 	CodeHashMap<PhysAddr, uint8_t*, 1<<16, 2> codeHashMap;
+
+	CodeHashMap<uintptr_t, int32_t, 1, 1<<19> unwindList;
 };
