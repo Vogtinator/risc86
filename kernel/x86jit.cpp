@@ -23,7 +23,6 @@
  * - Pad new translations so that that don't invalidate old ones in the i$?
  * - More eager flushing of dirty regs also in the hot path,
  *   so that there's less flushing in early exit (cond jump, fault handle) paths?
- * - Support immediate displacement in load/stores
  */
 
 X86JIT::X86JIT() {}
@@ -185,6 +184,33 @@ void X86JIT::emitCliHlt()
 	emit8(0xf4); // hlt
 }
 
+void X86JIT::emitMovMem(X86Reg base, int32_t disp, X86Reg data, bool isLoad, uint8_t size)
+{
+	uint8_t movLoadBit = isLoad ? 2 : 0;
+
+	if (size == 2)
+		emit8(0x66); // Operand-size override
+
+	emitREX(size == 8, regREXBit(data), false, regREXBit(base));
+
+	// movb or mov
+	if (size == 1)
+		emit8(0x88 | movLoadBit); // movb
+	else
+		emit8(0x89 | movLoadBit); // mov
+
+	// ModRM: either (%base), off8(%base) or off32(%base)
+	if (disp == 0 && regLow3Bits(base) != 0b101) { // (%rbp)/(%r13) encodes disp32(%rip) instead
+		emit8(0x00 | (regLow3Bits(data) << 3) | regLow3Bits(base));
+	} else if (disp >= INT8_MIN && disp <= INT8_MAX) {
+		emit8(0x40 | (regLow3Bits(data) << 3) | regLow3Bits(base));
+		emitRaw<int8_t>(disp);
+	} else {
+		emit8(0x80 | (regLow3Bits(data) << 3) | regLow3Bits(base));
+		emitRaw<int32_t>(disp);
+	}
+}
+
 void X86JIT::emitLoadRVReg(RVReg rvReg, X86Reg x86Reg)
 {
 	if (rvReg == 0) {
@@ -193,38 +219,17 @@ void X86JIT::emitLoadRVReg(RVReg rvReg, X86Reg x86Reg)
 	}
 
 	int32_t off = offsetof(Hart, regs[rvReg]) - hartPtrBias;
-	if (int8_t(off) == off) {
-		// mov off8(%rdi), %x86reg
-		emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
-		emit8(0x8B);
-		emit8(0x40 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-		emitRaw<int8_t>(off);
-		return;
-	}
-
-	// mov off32(%rdi), %x86reg
-	emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
-	emit8(0x8B);
-	emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(off);
+	emitMovMem(hartPtrReg, off, x86Reg, true, sizeof(uint64_t));
 }
 
 void X86JIT::emitLoadPC(X86Reg x86Reg)
 {
-	// mov off32(%rdi), %x86reg
-	emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
-	emit8(0x8B);
-	emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
+	emitMovMem(hartPtrReg, offsetof(Hart, pc) - hartPtrBias, x86Reg, true, sizeof(uint64_t));
 }
 
 void X86JIT::emitStorePC(X86Reg x86Reg)
 {
-	// mov %x86reg, off32(%rdi)
-	emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
-	emit8(0x89);
-	emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
+	emitMovMem(hartPtrReg, offsetof(Hart, pc) - hartPtrBias, x86Reg, false, sizeof(uint64_t));
 }
 
 void X86JIT::emitAddPC(int32_t value)
@@ -245,6 +250,7 @@ void X86JIT::emitAddPC(int32_t value)
 	// addq $value32, off32(%rdi)
 	emitREX(true, false, false, regREXBit(hartPtrReg));
 	emit8(0x81);
+	// TODO: ModRM helper?
 	emit8(0x80 | regLow3Bits(hartPtrReg));
 	emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
 	emitRaw<int32_t>(value);
@@ -268,20 +274,7 @@ void X86JIT::emitStoreRVReg64(X86Reg x86Reg, RVReg rvReg)
 		panic("Attempted to write to x0");
 
 	int32_t off = offsetof(Hart, regs[rvReg]) - hartPtrBias;
-	if (int8_t(off) == off) {
-		// mov %x86reg, off8(%rdi)
-		emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
-		emit8(0x89);
-		emit8(0x40 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-		emitRaw<int8_t>(off);
-		return;
-	}
-
-	// mov %x86reg, off32(%rdi)
-	emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
-	emit8(0x89);
-	emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(off);
+	emitMovMem(hartPtrReg, off, x86Reg, false, sizeof(uint64_t));
 }
 
 void X86JIT::emitSExtX86Reg(X86Reg x86Reg)
@@ -673,19 +666,11 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 
 		uint32_t rs2 = (inst >> 2) & 31;
 
-		// %rdx = x2 + imm
-		X86Reg spX86 = mapRVRegForRead64(2);
-		emitMovRegReg(spX86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, off);
-
-		// %rax = rs2
-		X86Reg rs2X86 = mapRVRegForRead64(rs2);
-		emitMovRegReg(rs2X86, X86Reg::RAX);
+		X86Reg spX86 = mapRVRegForRead64(2),
+			   rs2X86 = mapRVRegForRead64(rs2);
 
 		emitFlushRegsToHartAndMark(addr);
-
-		// mov %rax, (%rdx)
-		emit8(0x48); emit8(0x89); emit8(0x02);
+		emitMovMem(spX86, off, rs2X86, false, sizeof(uint64_t));
 		return true;
 	} else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'10) { // c.ldsp
 		uint16_t imm5  = (inst >> 12) & 1,
@@ -699,18 +684,13 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		if (rd == 0)
 			panic("Reserved instruction %x", inst);
 
-		// %rdx = x2 + imm
-		X86Reg spX86 = mapRVRegForRead64(2);
-		emitMovRegReg(spX86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, off);
+		X86Reg spX86 = mapRVRegForRead64(2),
+			   rdX86 = mapRVRegForRead64(rd); // TODO: Actually write prepare!
 
 		emitFlushRegsToHartAndMark(addr);
+		emitMovMem(spX86, off, rdX86, true, sizeof(uint64_t));
 
-		// mov (%rdx), %rax
-		emit8(0x48); emit8(0x8B); emit8(0x02);
-
-		X86Reg rdX86 = mapRVRegForWrite64(rd);
-		emitMovRegReg(X86Reg::RAX, rdX86);
+		rdX86 = mapRVRegForWrite64(rd);
 		return true;
 	} else if ((inst & 0b111'1'11'000'00'000'11) == 0b100'0'11'000'00'000'01) { // c.sub/c.xor/c.or/c.and
 		uint32_t rs2 = ((inst >> 2) & 7) + 8,
@@ -822,24 +802,13 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		uint32_t rs1 = ((inst >> 7) & 7) + 8,
 		        rd  = ((inst >> 2) & 7) + 8;
 
-		X86Reg rs1X86 = mapRVRegForRead64(rs1);
-
-		// %rdx = rs1
-		emitMovRegReg(rs1X86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, off);
+		X86Reg rs1X86 = mapRVRegForRead64(rs1),
+			   rdX86 = mapRVRegForRead32(rd); // TODO: Actually write prepare!
 
 		emitFlushRegsToHartAndMark(addr);
+		emitMovMem(rs1X86, off, rdX86, true, sizeof(uint32_t));
 
-		// mov (%rdx), %eax
-		emit8(0x8B); emit8(0x02);
-
-		X86Reg rdX86 = mapRVRegForWrite64(rd);
-
-		// movsx %eax, %rdX86
-		emitREX(true, regREXBit(rdX86), false, false);
-		emit8(0x63);
-		emit8(0xC0 | (regLow3Bits(rdX86) << 3));
-
+		rdX86 = mapRVRegForWrite32(rd);
 		return true;
 	} else if ((inst & 0b111'000'000'00'000'11) == 0b110'000'000'00'000'00) { // c.sw
 		uint16_t imm53 = (inst >> 10) & 7,
@@ -854,17 +823,8 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		X86Reg rs1X86 = mapRVRegForRead64(rs1),
 		       rs2X86 = mapRVRegForRead32(rs2);
 
-		// %rdx = rs1 + off
-		emitMovRegReg(rs1X86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, off);
-
-		// %rax = rs2
-		emitMovRegReg(rs2X86, X86Reg::RAX);
-
 		emitFlushRegsToHartAndMark(addr);
-
-		// mov %eax, (%rdx)
-		emit8(0x89); emit8(0x02);
+		emitMovMem(rs1X86, off, rs2X86, false, sizeof(uint32_t));
 		return true;
 	} else if ((inst & 0b111'000'000'00'000'11) == 0b011'000'000'00'000'00) { // c.ld
 		uint16_t imm53 = (inst >> 10) & 7,
@@ -875,19 +835,13 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		uint32_t rs1 = ((inst >> 7) & 7) + 8,
 		        rd  = ((inst >> 2) & 7) + 8;
 
-		X86Reg rs1X86 = mapRVRegForRead64(rs1);
-
-		// %rdx = rs1
-		emitMovRegReg(rs1X86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, off);
+		X86Reg rs1X86 = mapRVRegForRead64(rs1),
+			   rdX86 = mapRVRegForRead64(rd); // TODO: Actually write prepare!
 
 		emitFlushRegsToHartAndMark(addr);
+		emitMovMem(rs1X86, off, rdX86, true, sizeof(uint64_t));
 
-		// mov (%rdx), %rax
-		emit8(0x48); emit8(0x8B); emit8(0x02);
-
-		X86Reg rdX86 = mapRVRegForWrite64(rd);
-		emitMovRegReg(X86Reg::RAX, rdX86);
+		rdX86 = mapRVRegForWrite64(rd);
 		return true;
 	} else if ((inst & 0b111'000'000'00'000'11) == 0b111'000'000'00'000'00) { // c.sd
 		uint16_t imm53 = (inst >> 10) & 7,
@@ -901,18 +855,8 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		X86Reg rs1X86 = mapRVRegForRead64(rs1),
 		       rs2X86 = mapRVRegForRead64(rs2);
 
-		// %rdx = rs1 + off
-		emitMovRegReg(rs1X86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, off);
-
-		// %rax = rs2
-		emitMovRegReg(rs2X86, X86Reg::RAX);
-
 		emitFlushRegsToHartAndMark(addr);
-
-		// mov %rax, (%rdx)
-		emit8(0x48); emit8(0x89); emit8(0x02);
-
+		emitMovMem(rs1X86, off, rs2X86, false, sizeof(uint64_t));
 		return true;
 	} else if ((inst & 0b110'000'000'00000'11) == 0b110'000'000'00000'01) { // c.beqz/c.bnez
 		bool branchIfNotZero = inst & (1 << 13);
@@ -972,80 +916,58 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		if (funct3 > 6)
 			return false;
 
-		// %rdx = rs1 + imm
-		X86Reg rs1X86 = mapRVRegForRead64(rs1);
-		emitMovRegReg(rs1X86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, imm);
+		X86Reg rs1X86 = mapRVRegForRead64(rs1),
+			   rdX86 = mapRVRegForRead(rd, funct3 == 2); // TODO: Actually write prepare!
 
 		emitFlushRegsToHartAndMark(addr);
 
 		switch (funct3)
 		{
 		case 0u: // lb
+			emitMovMem(rs1X86, imm, rdX86, true, sizeof(uint8_t));
+
+			// movsx %rdX86b, %rdX86
+			emitREX(true, regREXBit(rdX86), false, regREXBit(rdX86));
+			emit8(0x0F); emit8(0xBE);
+			emit8(0xC0 | (regLow3Bits(rdX86) << 3) | regLow3Bits(rdX86));
+			break;
 		case 4u: // lbu
-			// mov (%rdx), %al
-			emit8(0x8A); emit8(0x02);
+			emitMovMem(rs1X86, imm, rdX86, true, sizeof(uint8_t));
+
+			// movzx %rdX86b, %rdX86
+			emitREX(true, regREXBit(rdX86), false, regREXBit(rdX86));
+			emit8(0x0F); emit8(0xB6);
+			emit8(0xC0 | (regLow3Bits(rdX86) << 3) | regLow3Bits(rdX86));
 			break;
 		case 1u: // lh
+			emitMovMem(rs1X86, imm, rdX86, true, sizeof(uint16_t));
+
+			// movsx %rdX86w, %rdX86
+			emitREX(true, regREXBit(rdX86), false, regREXBit(rdX86));
+			emit8(0x0F); emit8(0xBF);
+			emit8(0xC0 | (regLow3Bits(rdX86) << 3) | regLow3Bits(rdX86));
+			break;
 		case 5u: // lhu
-			// mov (%rdx), %ax
-			emit8(0x66); emit8(0x8B); emit8(0x02);
+			emitMovMem(rs1X86, imm, rdX86, true, sizeof(uint16_t));
+
+			// movzx %rdX86w, %rdX86
+			emitREX(true, regREXBit(rdX86), false, regREXBit(rdX86));
+			emit8(0x0F); emit8(0xB7);
+			emit8(0xC0 | (regLow3Bits(rdX86) << 3) | regLow3Bits(rdX86));
 			break;
 		case 2u: // lw
 		case 6u: // lwu
-			// mov (%rdx), %eax
-			emit8(0x8B); emit8(0x02);
+			emitMovMem(rs1X86, imm, rdX86, true, sizeof(uint32_t));
+			// No sign extension needed
 			break;
 		case 3u: // ld
-			// mov (%rdx), %rax
-			emit8(0x48); emit8(0x8B); emit8(0x02);
+			emitMovMem(rs1X86, imm, rdX86, true, sizeof(uint64_t));
 			break;
 		default:
 			panic("Unknown load instruction");
 		}
 
-		// No fault: Store result in rd
-		X86Reg rdX86 = mapRVRegForWrite64(rd);
-		switch (funct3)
-		{
-		case 0u: // lb
-			// movsx %al, %rdX86
-			emitREX(true, regREXBit(rdX86), false, false);
-			emit8(0x0F); emit8(0xBE);
-			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
-			break;
-		case 4u: // lbu
-			// movzx %al, %rdX86
-			emitREX(true, regREXBit(rdX86), false, false);
-			emit8(0x0F); emit8(0xB6);
-			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
-			break;
-		case 1u: // lh
-			// movsx %ax, %rdX86
-			emitREX(true, regREXBit(rdX86), false, false);
-			emit8(0x0F); emit8(0xBF);
-			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
-			break;
-		case 5u: // lhu
-			// movzx %ax, %rdX86
-			emitREX(true, regREXBit(rdX86), false, false);
-			emit8(0x0F); emit8(0xB7);
-			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
-			break;
-		case 2u: // lw
-			// movsx %eax, %rdX86
-			emitREX(true, regREXBit(rdX86), false, false);
-			emit8(0x63);
-			emit8(0xC0 | (regLow3Bits(rdX86) << 3));
-			break;
-		case 6u: // lwu
-		case 3u: // ld
-			// No sign extension needed
-			emitMovRegReg(X86Reg::RAX, rdX86);
-			break;
-		default:
-			panic("Unknown load instruction");
-		}
+		rdX86 = mapRVRegForWrite(rd, funct3 == 2);
 
 		return true;
 	}
@@ -1225,43 +1147,11 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		if (funct3 > 3)
 			return false;
 
-		// %rdx = rs1 + imm
-		X86Reg rs1X86 = mapRVRegForRead64(rs1);
-		emitMovRegReg(rs1X86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, imm);
-
-		// %rax = rs2
-		X86Reg rs2X86;
-		if (funct3 == 3)
-			rs2X86 = mapRVRegForRead64(rs2);
-		else
-			rs2X86 = mapRVRegForRead32(rs2);
-
-		emitMovRegReg(rs2X86, X86Reg::RAX);
+		X86Reg rs1X86 = mapRVRegForRead64(rs1),
+			   rs2X86 = mapRVRegForRead(rs2, funct3 < 3);
 
 		emitFlushRegsToHartAndMark(addr);
-
-		switch (funct3)
-		{
-		case 0u: // sb
-			// mov %al, (%rdx)
-			emit8(0x88); emit8(0x02);
-			break;
-		case 1u: // sh
-			// mov %ax, (%rdx)
-			emit8(0x66); emit8(0x89); emit8(0x02);
-			break;
-		case 2u: // sw
-			// mov %eax, (%rdx)
-			emit8(0x89); emit8(0x02);
-			break;
-		case 3u: // sd
-			// mov %rax, (%rdx)
-			emit8(0x48); emit8(0x89); emit8(0x02);
-			break;
-		default:
-			panic("Unknown store");
-		}
+		emitMovMem(rs1X86, imm, rs2X86, false, 1 << funct3);
 		return true;
 	}
 	case 0x33u: // integer register
