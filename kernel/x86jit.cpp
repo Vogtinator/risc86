@@ -41,9 +41,11 @@ bool X86JIT::tryJit(Hart *hart, PhysAddr pcPhys)
 	uint8_t *code;
 	if (!codeHashMap.lookup(pcPhys, &code)) {
 		// Make space for at least one translation
-		if (codeRegionEnd - codeRegionCurrent < MIN_TRANSLATION_SPACE
-		    || unwindList.buckets[0].numEntries == unwindList.epb) {
+		if (codeRegionEnd - codeRegionCurrent < MIN_TRANSLATION_SPACE) {
 			printf("JIT code region full, resetting.\n");
+			reset();
+		} else if (unwindList.buckets[0].numEntries == unwindList.epb) {
+			printf("JIT unwind table full, resetting.\n");
 			reset();
 		}
 
@@ -993,6 +995,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		{
 		case 0x0u: // addi
 			// lea off32(%rs1X86), %rdX86
+			// TODO: off8?
 			emitREX(true, regREXBit(rdX86), false, regREXBit(rs1X86));
 			emit8(0x8D);
 			emit8(0x80 | (regLow3Bits(rdX86) << 3) | regLow3Bits(rs1X86));
@@ -1106,6 +1109,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		switch (funct3)
 		{
 		case 0x0u: // addiw
+			// TODO: off8?
 			// lea off32(%rs1X86), %rdX86(32bit)
 			emitREX(false, regREXBit(rdX86), false, regREXBit(rs1X86));
 			emit8(0x8D);

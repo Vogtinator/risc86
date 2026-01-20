@@ -20,7 +20,7 @@ public:
 	void adjustPCForFault(Hart *hart, uintptr_t ip);
 private:
 	const size_t JIT_REGION_SIZE = 128*1024*1024; // 128 MiB
-	const int MIN_TRANSLATION_SPACE = 256;
+	const int MIN_TRANSLATION_SPACE = 128;
 
 	__attribute__((warn_unused_result))
 	uint32_t jumpToCode(Hart *hart, uint8_t *code);
