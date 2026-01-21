@@ -89,19 +89,6 @@ bool X86JIT::handlePageFault(Hart *hart, InterruptFrame *frame, bool isWrite)
 	if (ip < uintptr_t(codeRegionStart) || ip >= uintptr_t(codeRegionCurrent))
 		return false;
 
-	uint32_t ipOffset = ip - uintptr_t(codeRegionStart);
-
-	uint16_t pcAddend;
-	if (!unwindList.lookup(ipOffset, jitUnwindListStart, &pcAddend)) {
-		// If the JIT jumps to another block, jitUnwindListStart may not match,
-		// do a full lookup instead.
-		// TODO: Set it from the JIT code in emitPCRelativeJump?
-		if (!unwindList.lookup(ipOffset, 0, &pcAddend))
-			panic("No unwind entry for 0x%lx!", ip);
-	}
-
-	hart->pc += pcAddend;
-
 	this->jitScause = isWrite ? Hart::SCAUSE_STORE_PAGE_FAULT : Hart::SCAUSE_LOAD_PAGE_FAULT;
 
 	uint64_t *stack = (uint64_t*) frame->sp;
@@ -115,15 +102,20 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 {
 	this->jitScause = 0;
 
+	register uint64_t hart_pc asm("r12") = hart->pc;
+
 	static_assert(hartPtrReg == X86Reg::RDI); // Hardcoded below
 	static_assert(x86DynRegFirst == X86Reg::R8); // Hardcoded below
 	static_assert(x86DynRegLast == X86Reg::R15); // Hardcoded below
 	asm("call %A[code]"
-	    :
-	    : [code] "r" (code), "D" (uintptr_t(hart) + hartPtrBias)
+		: "+r" (hart_pc)
+		: [code] "r" (code), "D" (uintptr_t(hart) + hartPtrBias)
 	    : "memory", "cc",
 	      "rcx", "rdx", "rbx",
-	      "r8", "r9", "r10", "r11", /*"r12",*/ "r13", "r14", "r15");
+		  "r8", "r9", "r10", "r11", "r13", "r14", "r15");
+
+	//printf("From %lx to %lx\n", hart->pc, hart_pc);
+	hart->pc = hart_pc;
 
 	return this->jitScause;
 }
@@ -249,36 +241,17 @@ void X86JIT::emitLoadRVReg(RVReg rvReg, X86Reg x86Reg)
 
 void X86JIT::emitLoadPC(X86Reg x86Reg)
 {
-	emitMovMem(hartPtrReg, offsetof(Hart, pc) - hartPtrBias, x86Reg, true, sizeof(uint64_t));
+	emitMovRegReg(X86Reg::R12, x86Reg);
 }
 
 void X86JIT::emitStorePC(X86Reg x86Reg)
 {
-	emitMovMem(hartPtrReg, offsetof(Hart, pc) - hartPtrBias, x86Reg, false, sizeof(uint64_t));
+	emitMovRegReg(x86Reg, X86Reg::R12);
 }
 
 void X86JIT::emitAddPC(int32_t value)
 {
-	if (value == 0)
-		return;
-
-	if (int8_t(value) == value) {
-		// addq $value8, off32(%rdi)
-		emitREX(true, false, false, regREXBit(hartPtrReg));
-		emit8(0x83);
-		emit8(0x80 | regLow3Bits(hartPtrReg));
-		emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
-		emitRaw<int8_t>(value);
-		return;
-	}
-
-	// addq $value32, off32(%rdi)
-	emitREX(true, false, false, regREXBit(hartPtrReg));
-	emit8(0x81);
-	// TODO: ModRM helper?
-	emit8(0x80 | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
-	emitRaw<int32_t>(value);
+	emitAddImmediate(X86Reg::R12, value);
 }
 
 template<typename T>
@@ -456,7 +429,7 @@ void X86JIT::emitFlushRegsToHartAndMark(PhysAddr curPC)
 		markRVRegFlushed(rv);
 	}
 
-	unwindList.insert(uintptr_t(codeRegionCurrent - codeRegionStart), curPC - lastHartPC);
+	emitUpdateHartPC(curPC);
 }
 
 void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
