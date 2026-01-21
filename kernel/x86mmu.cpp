@@ -39,14 +39,8 @@ static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 	}
 
 	// Set the Carry flag on fault and advance, clear it otherwise
-	if (isFault && hart->inJit) {
-		getPerCPU()->x86jit.adjustPCForFault(hart, frame->ip);
-
-		hart->jitScause = isWrite ? Hart::SCAUSE_STORE_PAGE_FAULT : Hart::SCAUSE_LOAD_PAGE_FAULT;
-
-		uint64_t *stack = (uint64_t*) frame->sp;
-		frame->ip = stack[0];
-		frame->sp += sizeof(stack[0]);
+	if (isFault && getPerCPU()->x86jit.handlePageFault(hart, frame, isWrite)) {
+		// X86JIT did everything itself
 	} else if (isFault) {
 		// Find which instruction caused the fault to get its length.
 		// Proper decoding not needed here, the set of possible instructions

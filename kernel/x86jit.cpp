@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "x86jit.h"
+#include "x86interrupts.h"
 
 /* How the JIT works:
  * In JIT generated code, %rdi points to the current struct Hart,
@@ -44,7 +45,10 @@ bool X86JIT::tryJit(Hart *hart, PhysAddr pcPhys)
 		if (codeRegionEnd - codeRegionCurrent < MIN_TRANSLATION_SPACE) {
 			printf("JIT code region full, resetting.\n");
 			reset();
-		} else if (unwindList.buckets[0].numEntries == unwindList.epb) {
+		} else if (codeHashMap.fullestBucketSize == codeHashMap.epb) {
+			printf("JIT code lookup table full, resetting.\n");
+			reset();
+		} else if (unwindList.fullestBucketSize == unwindList.epb) {
 			printf("JIT unwind table full, resetting.\n");
 			reset();
 		}
@@ -76,19 +80,33 @@ void X86JIT::reset()
 	unwindList.clear();
 }
 
-void X86JIT::adjustPCForFault(Hart *hart, uintptr_t ip)
+bool X86JIT::handlePageFault(Hart *hart, InterruptFrame *frame, bool isWrite)
 {
+	auto ip = frame->ip;
+
+	if (ip < uintptr_t(codeRegionStart) || ip >= uintptr_t(codeRegionCurrent))
+		return false;
+
+	uint32_t ipOffset = ip - uintptr_t(codeRegionStart);
+
 	int32_t pcAddend;
-	if (!unwindList.lookup(ip, &pcAddend))
+	if (!unwindList.lookup(ipOffset, &pcAddend))
 		panic("No unwind entry for 0x%lx!", ip);
 
 	hart->pc += pcAddend;
+
+	this->jitScause = isWrite ? Hart::SCAUSE_STORE_PAGE_FAULT : Hart::SCAUSE_LOAD_PAGE_FAULT;
+
+	uint64_t *stack = (uint64_t*) frame->sp;
+	frame->ip = stack[0];
+	frame->sp += sizeof(stack[0]);
+
+	return true;
 }
 
 uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 {
-	hart->inJit = true;
-	hart->jitScause = 0;
+	this->jitScause = 0;
 
 	static_assert(hartPtrReg == X86Reg::RDI); // Hardcoded below
 	static_assert(x86DynRegFirst == X86Reg::R8); // Hardcoded below
@@ -100,9 +118,7 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	      "rcx", "rdx", "rbx",
 	      "r8", "r9", "r10", "r11", /*"r12",*/ "r13", "r14", "r15");
 
-	hart->inJit = false;
-
-	return hart->jitScause;
+	return this->jitScause;
 }
 
 void X86JIT::emitREX(bool w, bool r, bool x, bool b)
@@ -433,7 +449,7 @@ void X86JIT::emitFlushRegsToHartAndMark(PhysAddr curPC)
 		markRVRegFlushed(rv);
 	}
 
-	unwindList.insert(uintptr_t(codeRegionCurrent), curPC - lastHartPC);
+	unwindList.insert(uintptr_t(codeRegionCurrent - codeRegionStart), curPC - lastHartPC);
 }
 
 void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
@@ -1521,7 +1537,7 @@ void X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::insert(Key 
 	auto bucketNum = bucketForKey(key);
 	auto &bucket = buckets[bucketNum];
 
-	if (bucket.numEntries == entriesPerBucket && numBuckets == 1)
+	if (bucket.numEntries == entriesPerBucket)
 		panic("FULL!");
 
 	// TODO: Better strategy
@@ -1529,6 +1545,8 @@ void X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::insert(Key 
 		bucket.numEntries = 0;
 
 	bucket.entries[bucket.numEntries++] = { key, result };
+
+	fullestBucketSize = max(fullestBucketSize, bucket.numEntries);
 }
 
 template<typename Key, typename Result, size_t numBuckets, size_t entriesPerBucket>
@@ -1550,6 +1568,8 @@ void X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::clear()
 {
 	for (size_t i = 0; i < numBuckets; ++i)
 		buckets[i].numEntries = 0;
+
+	fullestBucketSize = 0;
 }
 
 template<typename Key, typename Result, size_t numBuckets, size_t entriesPerBucket>
@@ -1558,7 +1578,9 @@ size_t X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::bucketFor
 	// Instructions are always aligned, drop the LSB.
 	key >>= 1;
 	// Mix entropy from higher bits into lower ones.
-	key = (key >> 32) ^ key;
+	if constexpr (sizeof(Key) > 4)
+		key = (key >> 32) ^ key;
+
 	key = (key >> 16) ^ key;
 	return key % numBuckets;
 }

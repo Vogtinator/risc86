@@ -17,7 +17,7 @@ public:
 	// Discard all translations.
 	void reset();
 
-	void adjustPCForFault(Hart *hart, uintptr_t ip);
+	bool handlePageFault(Hart *hart, struct InterruptFrame *frame, bool isWrite);
 private:
 	const size_t JIT_REGION_SIZE = 128*1024*1024; // 128 MiB
 	const int MIN_TRANSLATION_SPACE = 128;
@@ -147,9 +147,12 @@ private:
 			} entries[entriesPerBucket];
 			size_t numEntries;
 		} buckets[numBuckets];
+
+		size_t fullestBucketSize;
 	};
 
-	CodeHashMap<PhysAddr, uint8_t*, 1<<16, 2> codeHashMap;
+	uint64_t jitScause;
 
-	CodeHashMap<uintptr_t, int32_t, 1, 1<<19> unwindList;
+	CodeHashMap<PhysAddr, uint8_t*, 1<<16, 16> codeHashMap;
+	CodeHashMap<uint32_t, int32_t, 1<<16, 16> unwindList;
 };
