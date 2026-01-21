@@ -19,7 +19,7 @@ public:
 
 	bool handlePageFault(Hart *hart, struct InterruptFrame *frame, bool isWrite);
 private:
-	const size_t JIT_REGION_SIZE = 128*1024*1024; // 128 MiB
+	const size_t JIT_REGION_SIZE = 64*1024*1024; // 64 MiB
 	const int MIN_TRANSLATION_SPACE = 128;
 
 	__attribute__((warn_unused_result))
@@ -140,6 +140,7 @@ private:
 	//private:
 		static const auto epb = entriesPerBucket;
 		size_t bucketForKey(Key key);
+		void print();
 		struct Bucket {
 			struct Entry {
 				Key key;
@@ -152,7 +153,31 @@ private:
 	};
 
 	uint64_t jitScause;
+	uint32_t jitUnwindListStart;
 
-	CodeHashMap<PhysAddr, uint8_t*, 1<<16, 16> codeHashMap;
-	CodeHashMap<uint32_t, int32_t, 1<<16, 16> unwindList;
+	struct CodeHashMapEntry {
+		uint8_t *code;
+		uint32_t unwindStart; // For faster lookup in unwindList
+	} __attribute__((packed));
+
+	CodeHashMap<PhysAddr, CodeHashMapEntry, 1<<16, 2> codeHashMap;
+
+	// TODO: Use in CodeHashMap
+	template <typename Key, typename Result, size_t Capacity>
+	struct Bucket {
+		static const size_t capacity = Capacity;
+		size_t numEntries;
+		struct {
+			Key key;
+			Result result;
+		} __attribute__((packed)) entries[Capacity];
+
+		void insert(Key key, Result result);
+		bool lookup(Key key, size_t startOffset, Result *result);
+		void clear() { numEntries = 0; }
+	};
+
+	// For each mem access instruction in JIT generated code (only offset from codeRegionStart saved),
+	// store the difference to the actual PC (< PAGE_SIZE) that needs to be added.
+	Bucket<uint32_t, uint16_t, 1<<19> unwindList;
 };
