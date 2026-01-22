@@ -179,5 +179,5 @@ private:
 
 	// For each mem access instruction in JIT generated code (only offset from codeRegionStart saved),
 	// store the difference to the actual PC (< PAGE_SIZE) that needs to be added.
-	Bucket<uint32_t, uint16_t, 1<<19> unwindList;
+	Bucket<uint32_t, uint16_t, 1<<20> unwindList;
 };

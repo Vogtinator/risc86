@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "x86jit.h"
+#include "percpu.h"
 #include "x86interrupts.h"
 
 /* How the JIT works:
@@ -92,13 +93,8 @@ bool X86JIT::handlePageFault(Hart *hart, InterruptFrame *frame, bool isWrite)
 	uint32_t ipOffset = ip - uintptr_t(codeRegionStart);
 
 	uint16_t pcAddend;
-	if (!unwindList.lookup(ipOffset, jitUnwindListStart, &pcAddend)) {
-		// If the JIT jumps to another block, jitUnwindListStart may not match,
-		// do a full lookup instead.
-		// TODO: Set it from the JIT code in emitPCRelativeJump?
-		if (!unwindList.lookup(ipOffset, 0, &pcAddend))
-			panic("No unwind entry for 0x%lx!", ip);
-	}
+	if (!unwindList.lookup(ipOffset, jitUnwindListStart, &pcAddend))
+		panic("No unwind entry for 0x%lx!", ip);
 
 	hart->pc += pcAddend;
 
@@ -479,8 +475,17 @@ void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
 		jumpDestination = thisTranslationStartCode; // Start of this translation
 	else if ((newPcPhys >> 12) != (thisTranslationStartPC >> 12))
 		jumpDestination = nullptr; // Different page
-	else if (CodeHashMapEntry translatedDest; codeHashMap.lookup(newPcPhys, &translatedDest))
+	else if (CodeHashMapEntry translatedDest; codeHashMap.lookup(newPcPhys, &translatedDest)) {
 		jumpDestination = translatedDest.code;
+
+		auto jumpUnwindStart = translatedDest.unwindStart;
+		emitMovImmediate32(X86Reg::RAX, jumpUnwindStart);
+		int64_t offset = offsetof(PerCpuState, x86jit.jitUnwindListStart) - offsetof(PerCpuState, hart) +- hartPtrBias;
+		if (offset < INT32_MIN || offset > INT32_MAX)
+			panic("Argh.");
+
+		emitMovMem(hartPtrReg, offset, X86Reg::RAX, false, sizeof(jitUnwindListStart));
+	}
 
 	if (jumpDestination != nullptr) {
 		// Check if there's an interrupt
@@ -1543,9 +1548,6 @@ void X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::insert(Key 
 {
 	auto bucketNum = bucketForKey(key);
 	auto &bucket = buckets[bucketNum];
-
-	if (bucket.numEntries == entriesPerBucket)
-		panic("FULL!");
 
 	// TODO: Better strategy
 	if (bucket.numEntries == entriesPerBucket)
