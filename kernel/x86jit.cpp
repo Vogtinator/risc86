@@ -438,6 +438,20 @@ X86JIT::X86Reg X86JIT::mapRVRegForReadWrite32(RVReg rvReg)
 	return ret;
 }
 
+X86JIT::X86Reg X86JIT::prepareRVRegForWrite(RVReg rvReg, bool is32bits)
+{
+	auto &mapEntry = rvRegsToX86[rvReg];
+	if (mapEntry.x86reg == NotMapped) {
+		mapEntry.x86reg = findFreeDynReg();
+	} else if (mapEntry.bits32 && !is32bits) {
+		emitSExtX86Reg(rvRegsToX86[rvReg].x86reg);
+		mapEntry.bits32 = false;
+	}
+
+	mapEntry.usedAtPC = thisTranslationCurrentPC;
+	return mapEntry.x86reg;
+}
+
 void X86JIT::emitFlushRegsToHart()
 {
 	for (int rv = 0; rv < 32; ++rv)
@@ -715,7 +729,7 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 			panic("Reserved instruction %x", inst);
 
 		X86Reg spX86 = mapRVRegForRead64(2),
-			   rdX86 = mapRVRegForRead64(rd); // TODO: Actually write prepare!
+			   rdX86 = prepareRVRegForWrite(rd, false);
 
 		emitFlushRegsToHartAndMark(addr);
 		emitMovMem(spX86, off, rdX86, true, sizeof(uint64_t));
@@ -833,7 +847,7 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		        rd  = ((inst >> 2) & 7) + 8;
 
 		X86Reg rs1X86 = mapRVRegForRead64(rs1),
-			   rdX86 = mapRVRegForRead32(rd); // TODO: Actually write prepare!
+			   rdX86 = prepareRVRegForWrite(rd, true);
 
 		emitFlushRegsToHartAndMark(addr);
 		emitMovMem(rs1X86, off, rdX86, true, sizeof(uint32_t));
@@ -866,7 +880,7 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		        rd  = ((inst >> 2) & 7) + 8;
 
 		X86Reg rs1X86 = mapRVRegForRead64(rs1),
-			   rdX86 = mapRVRegForRead64(rd); // TODO: Actually write prepare!
+			   rdX86 = prepareRVRegForWrite(rd, false);
 
 		emitFlushRegsToHartAndMark(addr);
 		emitMovMem(rs1X86, off, rdX86, true, sizeof(uint64_t));
@@ -947,7 +961,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			return false;
 
 		X86Reg rs1X86 = mapRVRegForRead64(rs1),
-			   rdX86 = mapRVRegForRead(rd, funct3 == 2); // TODO: Actually write prepare!
+			   rdX86 = prepareRVRegForWrite(rd, funct3 == 2);
 
 		emitFlushRegsToHartAndMark(addr);
 

@@ -80,6 +80,7 @@ private:
 	X86Reg mapRVRegForRead64(RVReg rvReg);
 	X86Reg mapRVRegForRead32(RVReg rvReg);
 	X86Reg mapRVRegForWrite(RVReg rvReg, bool is32bits);
+	X86Reg prepareRVRegForWrite(RVReg rvReg, bool is32bits);
 	X86Reg mapRVRegForWrite32(RVReg rvReg);
 	X86Reg mapRVRegForWrite64(RVReg rvReg);
 	X86Reg mapRVRegForReadWrite64(RVReg rvReg);
