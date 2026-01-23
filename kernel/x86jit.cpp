@@ -39,7 +39,7 @@ void X86JIT::init()
 bool X86JIT::tryJit(Hart *hart, PhysAddr pcPhys)
 {
 	// Not already translated?
-	CodeHashMapEntry code;
+	uint8_t *code;
 	if (!codeHashMap.lookup(pcPhys, &code)) {
 		// Make space for at least one translation
 		if (codeRegionEnd - codeRegionCurrent < MIN_TRANSLATION_SPACE) {
@@ -49,21 +49,17 @@ bool X86JIT::tryJit(Hart *hart, PhysAddr pcPhys)
 			printf("JIT code lookup table full, resetting.\n");
 			codeHashMap.print();
 			reset();
-		} */ else if (unwindList.numEntries == unwindList.capacity) {
-			printf("JIT unwind table full, resetting.\n");
-			reset();
-		}
+		} */
 
 		// Try to make a translation
-		code = { codeRegionCurrent, uint32_t(unwindList.numEntries) };
+		code = codeRegionCurrent;
 		if (!translate(pcPhys))
 			return false;
 
 		codeHashMap.insert(pcPhys, code);
 	}
 
-	jitUnwindListStart = code.unwindStart;
-	auto scause = jumpToCode(hart, code.code);
+	auto scause = jumpToCode(hart, code);
 
 	if (scause != 0) { // Fault?
 		// stval already set by the page fault handler
@@ -79,7 +75,6 @@ void X86JIT::reset()
 
 	// Reset RV -> JIT code mappings
 	codeHashMap.clear();
-	unwindList.clear();
 }
 
 bool X86JIT::handlePageFault(Hart *hart, InterruptFrame *frame, bool isWrite)
@@ -452,8 +447,8 @@ void X86JIT::emitPCRelativeJump(PhysAddr pcPhys, int32_t imm)
 		jumpDestination = thisTranslationStartCode; // Start of this translation
 	else if ((newPcPhys >> 12) != (thisTranslationStartPC >> 12))
 		jumpDestination = nullptr; // Different page
-	else if (CodeHashMapEntry translatedDest; codeHashMap.lookup(newPcPhys, &translatedDest))
-		jumpDestination = translatedDest.code;
+	else if (uint8_t *translatedDest; codeHashMap.lookup(newPcPhys, &translatedDest))
+		jumpDestination = translatedDest;
 
 	if (jumpDestination != nullptr) {
 		// Check if there's an interrupt
@@ -1471,9 +1466,6 @@ bool X86JIT::translate(PhysAddr entry)
 		if (codeRegionEnd - codeRegionCurrent < MIN_TRANSLATION_SPACE)
 			break;
 
-		if (unwindList.numEntries == unwindList.capacity)
-			break;
-
 		uint16_t inst16 = *phys_to_virt<uint16_t>(addr);
 		if ((inst16 & 0b11) == 0b11) { // 32bit instruction?
 			if ((addr & 0xFFF) > 0xFFC)
@@ -1517,8 +1509,8 @@ void X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::insert(Key 
 	auto bucketNum = bucketForKey(key);
 	auto &bucket = buckets[bucketNum];
 
-	if (bucket.numEntries == entriesPerBucket)
-		panic("FULL!");
+	/*if (bucket.numEntries == entriesPerBucket)
+		panic("FULL!");*/
 
 	// TODO: Better strategy
 	if (bucket.numEntries == entriesPerBucket)
@@ -1565,40 +1557,4 @@ size_t X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::bucketFor
 	key = x;
 
 	return key % numBuckets;
-}
-
-// TODO: Remove?
-template<typename Key, typename Result, size_t numBuckets, size_t entriesPerBucket>
-void X86JIT::CodeHashMap<Key, Result, numBuckets, entriesPerBucket>::print()
-{
-	size_t occupancy = 0;
-	for (size_t i = 0; i < numBuckets; ++i)
-		if (buckets[i].numEntries) {
-			occupancy++;
-			for (size_t e = 0; e < buckets[i].numEntries; ++e)
-				printf("bucket[%ld][%lu] [%lx] => %lx\n", i, e, uint64_t(buckets[i].entries[e].key), uint64_t(buckets[i].entries[e].result));
-		}
-
-	printf("Occupancy: %lu/%lu\n", occupancy, numBuckets);
-}
-
-template<typename Key, typename Result, size_t Capacity>
-void X86JIT::Bucket<Key, Result, Capacity>::insert(Key key, Result result)
-{
-	if (numEntries == Capacity)
-		panic("Full!");
-
-	entries[numEntries++] = {key, result};
-}
-
-template<typename Key, typename Result, size_t Capacity>
-bool X86JIT::Bucket<Key, Result, Capacity>::lookup(Key key, size_t startOffset, Result *result)
-{
-	for (size_t i = startOffset; i < numEntries; ++i)
-		if (entries[i].key == key) {
-			*result = entries[i].result;
-			return true;
-		}
-
-	return false;
 }
