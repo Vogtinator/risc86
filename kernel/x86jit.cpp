@@ -102,19 +102,19 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 {
 	this->jitScause = 0;
 
-	register uint64_t hart_pc asm("r12") = hart->pc;
-
+	static_assert(hartPCReg == X86Reg::R12); // Hardcoded below
 	static_assert(hartPtrReg == X86Reg::RDI); // Hardcoded below
 	static_assert(x86DynRegFirst == X86Reg::R8); // Hardcoded below
 	static_assert(x86DynRegLast == X86Reg::R15); // Hardcoded below
+	// +{r12} constriaint not supported by clang
+	register uint64_t hart_pc asm("r12") = hart->pc;
 	asm("call %A[code]"
-		: "+r" (hart_pc)
+	    : "+r" (hart_pc)
 		: [code] "r" (code), "D" (uintptr_t(hart) + hartPtrBias)
 	    : "memory", "cc",
-	      "rcx", "rdx", "rbx",
-		  "r8", "r9", "r10", "r11", "r13", "r14", "r15");
+	      "rax", "rcx", "rdx", "rbx",
+	      "r8", "r9", "r10", "r11", "r13", "r14", "r15");
 
-	//printf("From %lx to %lx\n", hart->pc, hart_pc);
 	hart->pc = hart_pc;
 
 	return this->jitScause;
@@ -241,17 +241,17 @@ void X86JIT::emitLoadRVReg(RVReg rvReg, X86Reg x86Reg)
 
 void X86JIT::emitLoadPC(X86Reg x86Reg)
 {
-	emitMovRegReg(X86Reg::R12, x86Reg);
+	emitMovRegReg(hartPCReg, x86Reg);
 }
 
 void X86JIT::emitStorePC(X86Reg x86Reg)
 {
-	emitMovRegReg(x86Reg, X86Reg::R12);
+	emitMovRegReg(x86Reg, hartPCReg);
 }
 
 void X86JIT::emitAddPC(int32_t value)
 {
-	emitAddImmediate(X86Reg::R12, value);
+	emitAddImmediate(hartPCReg, value);
 }
 
 template<typename T>
@@ -312,7 +312,7 @@ X86JIT::X86Reg X86JIT::findFreeDynReg()
 {
 	// Try to find a free register
 	for (X86Reg r = x86DynRegFirst; r <= x86DynRegLast; r = X86Reg(uint8_t(r) + 1)) {
-		if (r == X86Reg::R12) {
+		if (r == X86Reg::R12 || r == hartPCReg) {
 			// Its three low bits are the same as %rsp, so %r12 also gets special
 			// treatment in ModRM. Just avoid it.
 			continue;
