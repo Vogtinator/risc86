@@ -179,6 +179,33 @@ void X86JIT::emitCliHlt()
 	emit8(0xf4); // hlt
 }
 
+void X86JIT::emitMovMem(X86Reg base, int32_t disp, X86Reg data, bool isLoad, uint8_t size)
+{
+	uint8_t movLoadBit = isLoad ? 2 : 0;
+
+	if (size == 2)
+		emit8(0x66); // Operand-size override
+
+	emitREX(size == 8, regREXBit(data), false, regREXBit(base));
+
+	// movb or mov
+	if (size == 1)
+		emit8(0x88 | movLoadBit); // movb
+	else
+		emit8(0x89 | movLoadBit); // mov
+
+	// ModRM: either (%base), off8(%base) or off32(%base)
+	if (disp == 0 && regLow3Bits(base) != 0b101) { // (%rbp)/(%r13) encodes disp32(%rip) instead
+		emit8(0x00 | (regLow3Bits(data) << 3) | regLow3Bits(base));
+	} else if (disp >= INT8_MIN && disp <= INT8_MAX) {
+		emit8(0x40 | (regLow3Bits(data) << 3) | regLow3Bits(base));
+		emitRaw<int8_t>(disp);
+	} else {
+		emit8(0x80 | (regLow3Bits(data) << 3) | regLow3Bits(base));
+		emitRaw<int32_t>(disp);
+	}
+}
+
 void X86JIT::emitLoadRVReg(RVReg rvReg, X86Reg x86Reg)
 {
 	if (rvReg == 0) {
@@ -187,20 +214,7 @@ void X86JIT::emitLoadRVReg(RVReg rvReg, X86Reg x86Reg)
 	}
 
 	int32_t off = offsetof(Hart, regs[rvReg]) - hartPtrBias;
-	if (int8_t(off) == off) {
-		// mov off8(%rdi), %x86reg
-		emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
-		emit8(0x8B);
-		emit8(0x40 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-		emitRaw<int8_t>(off);
-		return;
-	}
-
-	// mov off32(%rdi), %x86reg
-	emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
-	emit8(0x8B);
-	emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(off);
+	emitMovMem(hartPtrReg, off, x86Reg, true, sizeof(uint64_t));
 }
 
 void X86JIT::emitLoadPC(X86Reg x86Reg)
@@ -236,20 +250,7 @@ void X86JIT::emitStoreRVReg64(X86Reg x86Reg, RVReg rvReg)
 		panic("Attempted to write to x0");
 
 	int32_t off = offsetof(Hart, regs[rvReg]) - hartPtrBias;
-	if (int8_t(off) == off) {
-		// mov %x86reg, off8(%rdi)
-		emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
-		emit8(0x89);
-		emit8(0x40 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-		emitRaw<int8_t>(off);
-		return;
-	}
-
-	// mov %x86reg, off32(%rdi)
-	emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
-	emit8(0x89);
-	emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(off);
+	emitMovMem(hartPtrReg, off, x86Reg, false, sizeof(uint64_t));
 }
 
 void X86JIT::emitSExtX86Reg(X86Reg x86Reg)
@@ -1075,6 +1076,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		{
 		case 0x0u: // addi
 			// lea off32(%rs1X86), %rdX86
+			// TODO: off8?
 			emitREX(true, regREXBit(rdX86), false, regREXBit(rs1X86));
 			emit8(0x8D);
 			emit8(0x80 | (regLow3Bits(rdX86) << 3) | regLow3Bits(rs1X86));
@@ -1188,6 +1190,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		switch (funct3)
 		{
 		case 0x0u: // addiw
+			// TODO: off8?
 			// lea off32(%rs1X86), %rdX86(32bit)
 			emitREX(false, regREXBit(rdX86), false, regREXBit(rs1X86));
 			emit8(0x8D);
