@@ -6,11 +6,12 @@
 
 /* How the JIT works:
  * In JIT generated code, %rdi points to the current struct Hart,
- * which is used to load/store registers and PC.
+ * which is used to load/store registers.
  * %rdi has an offset to regs[16] (hartPtrBias), so that all 32 registers
  * can be addressed with an 8-bit signed displacement.
- * r8-r15 are dynamically allocated and are used for hart register state.
- * The PC is not updated for each instruction but only on demand.
+ * r8-r15 (not r12) are dynamically allocated and are used for hart register state.
+ * r12 is hart->pc, but not updated for each instruction but only updated on demand
+ * (read/write to PC, translation exit).
  * The generated code returns with a status code in $eax, that is either
  * 0 on success or maps to scause in case of a fault.
  */
@@ -78,15 +79,21 @@ void X86JIT::reset()
 uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 {
 	uint32_t ret;
+
+	static_assert(hartPCReg == X86Reg::R12); // Hardcoded below
 	static_assert(hartPtrReg == X86Reg::RDI); // Hardcoded below
 	static_assert(x86DynRegFirst == X86Reg::R8); // Hardcoded below
 	static_assert(x86DynRegLast == X86Reg::R15); // Hardcoded below
+	// +{r12} constraint not supported by clang
+	register uint64_t hart_pc asm("r12") = hart->pc;
 	asm("call %A[code]"
-	    : "=a" (ret)
+	    : "=a" (ret), "+r" (hart_pc)
 	    : [code] "r" (code), "D" (uintptr_t(hart) + hartPtrBias)
 	    : "memory", "cc",
 	      "rcx", "rdx", "rbx",
-	      "r8", "r9", "r10", "r11", /*"r12",*/ "r13", "r14", "r15");
+	      "r8", "r9", "r10", "r11", "r13", "r14", "r15");
+
+	hart->pc = hart_pc;
 
 	return ret;
 }
@@ -198,43 +205,17 @@ void X86JIT::emitLoadRVReg(RVReg rvReg, X86Reg x86Reg)
 
 void X86JIT::emitLoadPC(X86Reg x86Reg)
 {
-	// mov off32(%rdi), %x86reg
-	emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
-	emit8(0x8B);
-	emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
+	emitMovRegReg(hartPCReg, x86Reg);
 }
 
 void X86JIT::emitStorePC(X86Reg x86Reg)
 {
-	// mov %x86reg, off32(%rdi)
-	emitREX(true, regREXBit(x86Reg), false, regREXBit(hartPtrReg));
-	emit8(0x89);
-	emit8(0x80 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
+	emitMovRegReg(x86Reg, hartPCReg);
 }
 
 void X86JIT::emitAddPC(int32_t value)
 {
-	if (value == 0)
-		return;
-
-	if (int8_t(value) == value) {
-		// addq $value8, off32(%rdi)
-		emitREX(true, false, false, regREXBit(hartPtrReg));
-		emit8(0x83);
-		emit8(0x80 | regLow3Bits(hartPtrReg));
-		emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
-		emitRaw<int8_t>(value);
-		return;
-	}
-
-	// addq $value32, off32(%rdi)
-	emitREX(true, false, false, regREXBit(hartPtrReg));
-	emit8(0x81);
-	emit8(0x80 | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(offsetof(Hart, pc) - hartPtrBias);
-	emitRaw<int32_t>(value);
+	emitAddImmediate(hartPCReg, value);
 }
 
 template<typename T>
@@ -315,7 +296,7 @@ X86JIT::X86Reg X86JIT::findFreeDynReg()
 {
 	// Try to find a free register
 	for (X86Reg r = x86DynRegFirst; r <= x86DynRegLast; r = X86Reg(uint8_t(r) + 1)) {
-		if (r == X86Reg::R12) {
+		if (r == X86Reg::R12 || r == hartPCReg) {
 			// Its three low bits are the same as %rsp, so %r12 also gets special
 			// treatment in ModRM. Just avoid it.
 			continue;
