@@ -53,6 +53,7 @@ private:
 	void emitMovRegReg(X86Reg from, X86Reg to);
 	void emitXorRegReg(X86Reg x86Reg);
 	void emitCliHlt(); // For debugging
+	void emitMovMem(X86Reg base, int32_t disp, X86Reg data, bool isLoad, uint8_t size);
 
 	// Low-level helpers for RV register management
 	static const X86Reg hartPtrReg = X86Reg::RDI, hartPCReg = X86Reg::R12;
