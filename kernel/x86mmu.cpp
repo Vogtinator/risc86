@@ -39,7 +39,9 @@ static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 	}
 
 	// Set the Carry flag on fault and advance, clear it otherwise
-	if (isFault) {
+	if (isFault && getPerCPU()->x86jit.handlePageFault(hart, frame, isWrite)) {
+		// X86JIT did everything itself
+	} else if (isFault) {
 		// Find which instruction caused the fault to get its length.
 		// Proper decoding not needed here, the set of possible instructions
 		// is known.

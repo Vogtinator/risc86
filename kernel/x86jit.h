@@ -2,6 +2,7 @@
 
 #include "hart.h"
 #include "mem.h"
+#include "x86interrupts.h"
 
 class X86JIT
 {
@@ -16,9 +17,13 @@ public:
 
 	// Discard all translations.
 	void reset();
+
+	// Called by X86MMU on page faults.
+	CALLED_FROM_IRQ
+	bool handlePageFault(Hart *hart, struct InterruptFrame *frame, bool isWrite);
 private:
-	const size_t JIT_REGION_SIZE = 128*1024*1024; // 128 MiB
-	const int MIN_TRANSLATION_SPACE = 256;
+	const size_t JIT_REGION_SIZE = 64*1024*1024; // 64 MiB
+	const int MIN_TRANSLATION_SPACE = 128;
 
 	__attribute__((warn_unused_result))
 	uint32_t jumpToCode(Hart *hart, uint8_t *code);
@@ -64,14 +69,14 @@ private:
 	void emitAddPC(int32_t value);
 	void emitStoreRVReg64(X86Reg x86Reg, RVReg rvReg);
 	void emitSExtX86Reg(X86Reg x86Reg); // 32->64 sign extension
-	void emitRet(uint32_t retVal);
+	void emitRet();
 
 	// High-level helpers for RV register management
 	// Use %r8-%r15, but skip %r12 as it has a different meaning in ModRM...
 	static const X86Reg x86DynRegFirst = X86Reg::R8, x86DynRegLast = X86Reg::R15;
 	// Flushes RV reg to struct Hart, does not change reg map.
 	void emitFlushRVReg(RVReg rvReg);
-	// Changes reg map accordingly.
+	// Changes reg map according to what emitFlushRVReg did.
 	void markRVRegFlushed(RVReg rvReg);
 	X86Reg findFreeDynReg();
 	X86Reg mapRVRegForRead(RVReg rvReg, bool bits32Ok);
@@ -82,14 +87,14 @@ private:
 	X86Reg mapRVRegForWrite64(RVReg rvReg);
 	X86Reg mapRVRegForReadWrite64(RVReg rvReg);
 	X86Reg mapRVRegForReadWrite32(RVReg rvReg);
+	// Flush all regs to struct Hart, does not chage reg map.
 	void emitFlushRegsToHart();
+	// Flush all regs to struct Hart and update hartPCReg, changes reg map.
+	void emitFlushRegsToHartAndMark(PhysAddr curPC);
 
 	// Emit jmp away to a new PC, leaving this translation.
 	// Tries to loop back to the beginning of this translation if possible.
 	void emitPCRelativeJump(PhysAddr pcPhys, int32_t imm);
-
-	// For load/store: If carry set, leave the translation with given scause.
-	void emitLeaveOnMemFault(PhysAddr curPC, uint32_t scause);
 
 	// State during generation of translations.
 	PhysAddr thisTranslationStartPC;
@@ -147,6 +152,9 @@ private:
 			size_t numEntries;
 		} buckets[numBuckets];
 	};
+
+	// Written during JIT code execution
+	uint64_t jitScause;
 
 	CodeHashMap<PhysAddr, uint8_t*, 1<<16, 2> codeHashMap;
 };
