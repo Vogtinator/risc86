@@ -882,21 +882,10 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 
 		// %rdx = x2 + imm
 		X86Reg spX86 = mapRVRegForRead64(2);
-		emitMovRegReg(spX86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, off);
-
-		// %rax = %rs2xmm
 		XMMReg rs2XMM = mapRVFRegForRead(rs2, false);
-		// movq %rs2Xmm, %rax
-		emit8(0x66);
-		emitREX(true, regREXBit(rs2XMM), false, false);
-		emit8(0x0f); emit8(0x7e);
-		emit8(0xC0 | (regLow3Bits(rs2XMM) << 3));
 
 		emitFlushRegsToHartAndMark(addr);
-
-		// mov %rax, (%rdx)
-		emit8(0x48); emit8(0x89); emit8(0x02);
+		emitMovMemXMM(spX86, off, rs2XMM, false, sizeof(double));
 		return true;
 	} else if ((inst & 0b111'0'00000'00000'11) == 0b011'0'00000'00000'10) { // c.ldsp
 		uint16_t imm5  = (inst >> 12) & 1,
@@ -963,23 +952,13 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		emitFaultOnFSOff(addr);
 		emitMarkFSDirty();
 
-		// %rdx = x2 + imm
 		X86Reg spX86 = mapRVRegForRead64(2);
-		emitMovRegReg(spX86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, off);
+		XMMReg rdXMM = mapRVFRegForRead(rd, false); // TODO: Actually write prepare
 
 		emitFlushRegsToHartAndMark(addr);
+		emitMovMemXMM(spX86, off, rdXMM, true, sizeof(double));
 
-		// mov (%rdx), %rax
-		emit8(0x48); emit8(0x8B); emit8(0x02);
-
-		XMMReg rdXMM = mapRVFRegForWrite(rd, false);
-
-		// movq %rax, %rdXMM
-		emit8(0x66);
-		emitREX(true, regREXBit(rdXMM), false, false);
-		emit8(0x0f); emit8(0x6e);
-		emit8(0xC0 | (regLow3Bits(rdXMM) << 3));
+		rdXMM = mapRVFRegForWrite(rd, false);
 		return true;
 	} else if ((inst & 0b111'1'11'000'00'000'11) == 0b100'0'11'000'00'000'01) { // c.sub/c.xor/c.or/c.and
 		uint32_t rs2 = ((inst >> 2) & 7) + 8,
@@ -1142,23 +1121,13 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		emitFaultOnFSOff(addr);
 		emitMarkFSDirty();
 
-		// %rdx = rs1 + off
 		X86Reg rs1X86 = mapRVRegForRead64(rs1);
-		emitMovRegReg(rs1X86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, off);
+		XMMReg rdXMM = mapRVFRegForRead(rd, false); // TODO: Actually write prepare
 
 		emitFlushRegsToHartAndMark(addr);
+		emitMovMemXMM(rs1X86, off, rdXMM, true, sizeof(double));
 
-		// mov (%rdx), %rax
-		emit8(0x48); emit8(0x8B); emit8(0x02);
-
-		XMMReg rdXMM = mapRVFRegForWrite(rd, false);
-
-		// movq %rax, %rdXMM
-		emit8(0x66);
-		emitREX(true, regREXBit(rdXMM), false, false);
-		emit8(0x0f); emit8(0x6e);
-		emit8(0xC0 | (regLow3Bits(rdXMM) << 3));
+		rdXMM = mapRVFRegForWrite(rd, false);
 		return true;
 	} else if ((inst & 0b111'000'000'00'000'11) == 0b111'000'000'00'000'00) { // c.sd
 		uint16_t imm53 = (inst >> 10) & 7,
@@ -1187,23 +1156,10 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		emitFaultOnFSOff(addr);
 
 		X86Reg rs1X86 = mapRVRegForRead64(rs1);
-
-		// %rdx = rs1 + off
-		emitMovRegReg(rs1X86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, off);
-
-		// %rax = %rs2xmm
 		XMMReg rs2XMM = mapRVFRegForRead(rs2, false);
-		// movq %rs2Xmm, %rax
-		emit8(0x66);
-		emitREX(true, regREXBit(rs2XMM), false, false);
-		emit8(0x0f); emit8(0x7e);
-		emit8(0xC0 | (regLow3Bits(rs2XMM) << 3));
 
 		emitFlushRegsToHartAndMark(addr);
-
-		// mov %rax, (%rdx)
-		emit8(0x48); emit8(0x89); emit8(0x02);
+		emitMovMemXMM(rs1X86, off, rs2XMM, false, sizeof(double));
 		return true;
 	} else if ((inst & 0b110'000'000'00000'11) == 0b110'000'000'00000'01) { // c.beqz/c.bnez
 		bool branchIfNotZero = inst & (1 << 13);
@@ -1332,29 +1288,13 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		emitFaultOnFSOff(addr);
 		emitMarkFSDirty();
 
-		// %rdx = rs1 + imm
 		X86Reg rs1X86 = mapRVRegForRead64(rs1);
-		emitMovRegReg(rs1X86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, imm);
+		XMMReg rdXMM = mapRVFRegForRead(rd, !isDouble); // TODO: Actually prepare for write
 
 		emitFlushRegsToHartAndMark(addr);
+		emitMovMemXMM(rs1X86, imm, rdXMM, true, isDouble ? 8 : 4);
 
-		if (isDouble) {
-			// mov (%rdx), %rax
-			emit8(0x48); emit8(0x8B); emit8(0x02);
-		} else {
-			// mov (%rdx), %eax
-			emit8(0x8B); emit8(0x02);
-		}
-
-		XMMReg rdXMM = mapRVFRegForWrite(rd, !isDouble);
-
-		// movd %eax, %rdXMM or movq %rax, %rdXMM
-		emit8(0x66);
-		emitREX(isDouble, regREXBit(rdXMM), false, false);
-		emit8(0x0f); emit8(0x6e);
-		emit8(0xC0 | (regLow3Bits(rdXMM) << 3));
-
+		rdXMM = mapRVFRegForWrite(rd, !isDouble);
 		return true;
 	}
 	case 0x13u: // integer immediate
@@ -1604,26 +1544,10 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 
 		// %rdx = rs1 + imm
 		X86Reg rs1X86 = mapRVRegForRead64(rs1);
-		emitMovRegReg(rs1X86, X86Reg::RDX);
-		emitAddImmediate(X86Reg::RDX, imm);
-
-		// %rax = %rs2xmm
 		XMMReg rs2XMM = mapRVFRegForRead(rs2, !isDouble);
-		// movd %rs2XMM, %eax or movq %rs2Xmm, %rax
-		emit8(0x66);
-		emitREX(isDouble, regREXBit(rs2XMM), false, false);
-		emit8(0x0f); emit8(0x7e);
-		emit8(0xC0 | (regLow3Bits(rs2XMM) << 3));
 
 		emitFlushRegsToHartAndMark(addr);
-
-		if (isDouble) {
-			// mov %rax, (%rdx)
-			emit8(0x48); emit8(0x89); emit8(0x02);
-		} else {
-			// mov %eax, (%rdx)
-			emit8(0x89); emit8(0x02);
-		}
+		emitMovMemXMM(rs1X86, imm, rs2XMM, false, isDouble ? 8 : 4);
 		return true;
 	}
 	case 0x33u: // integer register
