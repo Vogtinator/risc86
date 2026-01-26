@@ -235,6 +235,19 @@ void X86JIT::emitMovMem(X86Reg base, int32_t disp, X86Reg data, bool isLoad, uin
 	emitModRMMem(regLow3Bits(data), regLow3Bits(base), disp);
 }
 
+void X86JIT::emitMovMemXMM(X86Reg base, int32_t disp, XMMReg data, bool isLoad, uint8_t size)
+{
+	emit8(size == sizeof(double) ? 0xF2 : 0xF3);
+
+	emitREX(false, regREXBit(data), false, regREXBit(base));
+
+	// movs/d mem, %data or %data, mem
+	emit8(0x0F); emit8(isLoad ? 0x10 : 0x11);
+
+	// Either (%base), off8(%base) or off32(%base)
+	emitModRMMem(regLow3Bits(data), regLow3Bits(base), disp);
+}
+
 void X86JIT::emitLoadRVReg(RVReg rvReg, X86Reg x86Reg)
 {
 	if (rvReg == 0) {
@@ -429,25 +442,13 @@ X86JIT::X86Reg X86JIT::mapRVRegForReadWrite32(RVReg rvReg)
 void X86JIT::emitLoadRVFReg(RVReg rvReg, XMMReg xmmReg)
 {
 	int32_t off = offsetof(Hart, fregs[rvReg]) - hartPtrBias;
-
-	// movsd off32(%rdi), %xmmreg
-	emit8(0xF2);
-	emitREX(false, regREXBit(xmmReg), false, regREXBit(hartPtrReg));
-	emit8(0x0F); emit8(0x10);
-	emit8(0x80 | (regLow3Bits(xmmReg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(off);
+	emitMovMemXMM(hartPtrReg, off, xmmReg, true, sizeof(double));
 }
 
 void X86JIT::emitStoreRVFReg64(XMMReg xmmReg, RVReg rvReg)
 {
 	int32_t off = offsetof(Hart, fregs[rvReg]) - hartPtrBias;
-
-	// movsd %xmmreg, off32(%rdi)
-	emit8(0xF2);
-	emitREX(false, regREXBit(xmmReg), false, regREXBit(hartPtrReg));
-	emit8(0x0F); emit8(0x11);
-	emit8(0x80 | (regLow3Bits(xmmReg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(off);
+	emitMovMemXMM(hartPtrReg, off, xmmReg, false, sizeof(double));
 }
 
 void X86JIT::emitNANBoxXMMReg(XMMReg xmmReg)
@@ -457,8 +458,7 @@ void X86JIT::emitNANBoxXMMReg(XMMReg xmmReg)
 	// orps off32(%rdi), %xmmreg
 	emitREX(false, regREXBit(xmmReg), false, regREXBit(hartPtrReg));
 	emit8(0x0F); emit8(0x56);
-	emit8(0x80 | (regLow3Bits(xmmReg) << 3) | regLow3Bits(hartPtrReg));
-	emitRaw<int32_t>(off);
+	emitModRMMem(regLow3Bits(xmmReg), regLow3Bits(hartPtrReg), off);
 }
 
 void X86JIT::emitFlushRVFReg(RVReg rvReg)
