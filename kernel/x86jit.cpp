@@ -953,12 +953,11 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		emitMarkFSDirty();
 
 		X86Reg spX86 = mapRVRegForRead64(2);
-		XMMReg rdXMM = mapRVFRegForRead(rd, false); // TODO: Actually write prepare
 
 		emitFlushRegsToHartAndMark(addr);
-		emitMovMemXMM(spX86, off, rdXMM, true, sizeof(double));
 
-		rdXMM = mapRVFRegForWrite(rd, false);
+		XMMReg rdXMM = mapRVFRegForWrite(rd, false);
+		emitMovMemXMM(spX86, off, rdXMM, true, sizeof(double));
 		return true;
 	} else if ((inst & 0b111'1'11'000'00'000'11) == 0b100'0'11'000'00'000'01) { // c.sub/c.xor/c.or/c.and
 		uint32_t rs2 = ((inst >> 2) & 7) + 8,
@@ -1122,12 +1121,11 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		emitMarkFSDirty();
 
 		X86Reg rs1X86 = mapRVRegForRead64(rs1);
-		XMMReg rdXMM = mapRVFRegForRead(rd, false); // TODO: Actually write prepare
 
 		emitFlushRegsToHartAndMark(addr);
-		emitMovMemXMM(rs1X86, off, rdXMM, true, sizeof(double));
 
-		rdXMM = mapRVFRegForWrite(rd, false);
+		XMMReg rdXMM = mapRVFRegForWrite(rd, false);
+		emitMovMemXMM(rs1X86, off, rdXMM, true, sizeof(double));
 		return true;
 	} else if ((inst & 0b111'000'000'00'000'11) == 0b111'000'000'00'000'00) { // c.sd
 		uint16_t imm53 = (inst >> 10) & 7,
@@ -1289,12 +1287,11 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		emitMarkFSDirty();
 
 		X86Reg rs1X86 = mapRVRegForRead64(rs1);
-		XMMReg rdXMM = mapRVFRegForRead(rd, !isDouble); // TODO: Actually prepare for write
 
 		emitFlushRegsToHartAndMark(addr);
-		emitMovMemXMM(rs1X86, imm, rdXMM, true, isDouble ? 8 : 4);
 
-		rdXMM = mapRVFRegForWrite(rd, !isDouble);
+		XMMReg rdXMM = mapRVFRegForWrite(rd, !isDouble);
+		emitMovMemXMM(rs1X86, imm, rdXMM, true, isDouble ? 8 : 4);
 		return true;
 	}
 	case 0x13u: // integer immediate
