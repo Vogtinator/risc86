@@ -683,13 +683,13 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		if (rd == 0)
 			panic("Reserved instruction %x", inst);
 
-		X86Reg spX86 = mapRVRegForRead64(2),
-		       rdX86 = mapRVRegForRead64(rd); // TODO: Actually write prepare!
+		X86Reg spX86 = mapRVRegForRead64(2);
 
 		emitFlushRegsToHartAndMark(addr);
-		emitMovMem(spX86, off, rdX86, true, sizeof(uint64_t));
 
-		rdX86 = mapRVRegForWrite64(rd);
+		X86Reg rdX86 = mapRVRegForWrite64(rd);
+
+		emitMovMem(spX86, off, rdX86, true, sizeof(uint64_t));
 		return true;
 	} else if ((inst & 0b111'000000'00000'11) == 0b110'000000'00000'10) { // c.swsp
 		uint16_t imm52 = (inst >>  9) & 0xF,
@@ -717,13 +717,12 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		if (rd == 0)
 			panic("Reserved instruction %x", inst);
 
-		X86Reg spX86 = mapRVRegForRead64(2),
-		       rdX86 = mapRVRegForRead32(rd); // TODO: Actually write prepare!
+		X86Reg spX86 = mapRVRegForRead64(2);
 
 		emitFlushRegsToHartAndMark(addr);
-		emitMovMem(spX86, off, rdX86, true, sizeof(uint32_t));
 
-		rdX86 = mapRVRegForWrite32(rd);
+		X86Reg rdX86 = mapRVRegForWrite32(rd);
+		emitMovMem(spX86, off, rdX86, true, sizeof(uint32_t));
 		return true;
 	} else if ((inst & 0b111'1'11'000'00'000'11) == 0b100'0'11'000'00'000'01) { // c.sub/c.xor/c.or/c.and
 		uint32_t rs2 = ((inst >> 2) & 7) + 8,
@@ -835,13 +834,12 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		uint32_t rs1 = ((inst >> 7) & 7) + 8,
 		        rd  = ((inst >> 2) & 7) + 8;
 
-		X86Reg rs1X86 = mapRVRegForRead64(rs1),
-		       rdX86 = mapRVRegForRead32(rd); // TODO: Actually write prepare!
+		X86Reg rs1X86 = mapRVRegForRead64(rs1);
 
 		emitFlushRegsToHartAndMark(addr);
-		emitMovMem(rs1X86, off, rdX86, true, sizeof(uint32_t));
 
-		rdX86 = mapRVRegForWrite32(rd);
+		X86Reg rdX86 = mapRVRegForWrite32(rd);
+		emitMovMem(rs1X86, off, rdX86, true, sizeof(uint32_t));
 		return true;
 	} else if ((inst & 0b111'000'000'00'000'11) == 0b110'000'000'00'000'00) { // c.sw
 		uint16_t imm53 = (inst >> 10) & 7,
@@ -868,13 +866,12 @@ bool X86JIT::translateRVCInstruction(PhysAddr addr, uint16_t inst)
 		uint32_t rs1 = ((inst >> 7) & 7) + 8,
 		        rd  = ((inst >> 2) & 7) + 8;
 
-		X86Reg rs1X86 = mapRVRegForRead64(rs1),
-		       rdX86 = mapRVRegForRead64(rd); // TODO: Actually write prepare!
+		X86Reg rs1X86 = mapRVRegForRead64(rs1);
 
 		emitFlushRegsToHartAndMark(addr);
-		emitMovMem(rs1X86, off, rdX86, true, sizeof(uint64_t));
 
-		rdX86 = mapRVRegForWrite64(rd);
+		X86Reg rdX86 = mapRVRegForWrite64(rd);
+		emitMovMem(rs1X86, off, rdX86, true, sizeof(uint64_t));
 		return true;
 	} else if ((inst & 0b111'000'000'00'000'11) == 0b111'000'000'00'000'00) { // c.sd
 		uint16_t imm53 = (inst >> 10) & 7,
@@ -949,10 +946,11 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		if (funct3 > 6)
 			return false;
 
-		X86Reg rs1X86 = mapRVRegForRead64(rs1),
-		       rdX86 = mapRVRegForRead(rd, funct3 == 2); // TODO: Actually write prepare!
+		X86Reg rs1X86 = mapRVRegForRead64(rs1);
 
 		emitFlushRegsToHartAndMark(addr);
+
+		X86Reg rdX86 = mapRVRegForWrite(rd, funct3 == 2);
 
 		switch (funct3)
 		{
@@ -999,8 +997,6 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		default:
 			panic("Unknown load instruction");
 		}
-
-		rdX86 = mapRVRegForWrite(rd, funct3 == 2);
 
 		return true;
 	}
