@@ -125,7 +125,8 @@ private:
 	void emitNANBoxXMMReg(XMMReg xmmReg); // Set high 32bits to 0xFFFFFFFF
 	// High-level
 	// TODO: What's the right number?
-	static const XMMReg xmmDynRegFirst = XMMReg::XMM1, xmmDynRegLast = XMMReg::XMM7;
+	static const XMMReg xmmDynRegFirst = XMMReg::XMM2, xmmDynRegLast = XMMReg::XMM7;
+	static const XMMReg xmmNANBoxReg = XMMReg::XMM1;
 	// Flushes RV FP reg to struct Hart, does not change reg map.
 	void emitFlushRVFReg(RVReg rvReg);
 	// Changes reg map accordingly.
@@ -160,6 +161,8 @@ private:
 	PhysAddr thisTranslationCurrentPC;
 	// emitFaultOnFSOff and emitMarkFSDirty are only needed once per translation
 	bool thisTranslationFSKnownOn, thisTranslationFSKnownDirty;
+	// Whether xmmNANBoxReg has been set.
+	bool thisTranslationXMMNanMaskSet;
 
 	// Some instruction need the correct value of hart->pc.
 	// This stores the value hart->pc currently has, so that the needed diff can be applied.
