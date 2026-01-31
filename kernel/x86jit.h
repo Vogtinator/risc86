@@ -23,7 +23,7 @@ public:
 	bool handlePageFault(Hart *hart, struct InterruptFrame *frame, bool isWrite);
 private:
 	const size_t JIT_REGION_SIZE = 64*1024*1024; // 64 MiB
-	const int MIN_TRANSLATION_SPACE = 128;
+	const int MIN_TRANSLATION_SPACE = 256;
 
 	__attribute__((warn_unused_result))
 	uint32_t jumpToCode(Hart *hart, uint8_t *code);
@@ -125,7 +125,7 @@ private:
 	void emitNANBoxXMMReg(XMMReg xmmReg); // Set high 32bits to 0xFFFFFFFF
 	// High-level
 	// TODO: What's the right number?
-	static const XMMReg xmmDynRegFirst = XMMReg::XMM2, xmmDynRegLast = XMMReg::XMM7;
+	static const XMMReg xmmDynRegFirst = XMMReg::XMM2, xmmDynRegLast = XMMReg::XMM12;
 	static const XMMReg xmmNANBoxReg = XMMReg::XMM1;
 	// Flushes RV FP reg to struct Hart, does not change reg map.
 	void emitFlushRVFReg(RVReg rvReg);
