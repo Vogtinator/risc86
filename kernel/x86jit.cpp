@@ -103,8 +103,8 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	static_assert(hartPtrReg == X86Reg::RDI); // Hardcoded below
 	static_assert(x86DynRegFirst == X86Reg::R8); // Hardcoded below
 	static_assert(x86DynRegLast == X86Reg::R15); // Hardcoded below
-	static_assert(xmmDynRegFirst == XMMReg::XMM11); // Hardcoded below
-	static_assert(xmmDynRegLast == XMMReg::XMM15); // Hardcoded below
+	static_assert(xmmDynRegFirst == XMMReg::XMM1); // Hardcoded below
+	static_assert(xmmDynRegLast == XMMReg::XMM7); // Hardcoded below
 	// +{r12} constraint not supported by clang
 	register uint64_t hart_pc asm("r12") = hart->pc;
 	asm("call %A[code]"
@@ -114,7 +114,7 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	      "rax", "rcx", "rdx", "rbx", // Temporaries
 	      "r8", "r9", "r10", "r11", "r13", "r14", "r15", // x86DynReg
 	      "xmm0", // Temporaries
-	      /*"xmm8", "xmm9", "xmm10",*/ "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"); // xmmDynReg
+	      "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"); // xmmDynReg
 
 	hart->pc = hart_pc;
 
@@ -239,7 +239,8 @@ void X86JIT::emitMovMemXMM(X86Reg base, int32_t disp, XMMReg data, bool isLoad, 
 {
 	emit8(size == sizeof(double) ? 0xF2 : 0xF3);
 
-	emitREX(false, regREXBit(data), false, regREXBit(base));
+	if (regREXBit(data) || regREXBit(base))
+		emitREX(false, regREXBit(data), false, regREXBit(base));
 
 	// movs/d mem, %data or %data, mem
 	emit8(0x0F); emit8(isLoad ? 0x10 : 0x11);
@@ -256,7 +257,7 @@ void X86JIT::emitVEX(bool w, VEXOpcPrefix m, VEXSIMDPrefix pp, bool r, bool x, b
 	if (!w && m == VEX_0F && !x && !b) {
 		// Can use 2-byte VEX
 		emit8(0xC5);
-		emit8((r << 7) | (v_inv << 3) | pp_bits);
+		emit8((!r << 7) | (v_inv << 3) | pp_bits);
 		return;
 	}
 
