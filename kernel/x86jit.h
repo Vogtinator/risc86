@@ -48,7 +48,7 @@ private:
 	static inline uint8_t regLow3Bits(X86Reg r) { return static_cast<uint8_t>(r) & 0b0111; }
 
 	enum class XMMReg {
-		XMM0=0,
+		XMM0=0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
 		XMM8=8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15,
 	};
 	static inline constexpr bool regREXBit(XMMReg r) { return static_cast<uint8_t>(r) & 0b1000; }
@@ -124,7 +124,7 @@ private:
 	void emitNANBoxXMMReg(XMMReg xmmReg); // Set high 32bits to 0xFFFFFFFF
 	// High-level
 	// TODO: What's the right number?
-	static const XMMReg xmmDynRegFirst = XMMReg::XMM11, xmmDynRegLast = XMMReg::XMM15;
+	static const XMMReg xmmDynRegFirst = XMMReg::XMM1, xmmDynRegLast = XMMReg::XMM7;
 	// Flushes RV FP reg to struct Hart, does not change reg map.
 	void emitFlushRVFReg(RVReg rvReg);
 	// Changes reg map accordingly.
