@@ -69,6 +69,18 @@ private:
 	void emitMovMem(X86Reg base, int32_t disp, X86Reg data, bool isLoad, uint8_t size);
 	void emitMovMemXMM(X86Reg base, int32_t disp, XMMReg data, bool isLoad, uint8_t size);
 
+	enum VEXOpcPrefix {
+		VEX_0F=1, VEX_0F_38=2, VEX_0F_3A=3,
+	};
+	enum VEXSIMDPrefix {
+		VEX_NONE=0, VEX_66, VEX_F3, VEX_F2,
+	};
+
+	static const XMMReg VEXNoV = static_cast<XMMReg>(0);
+
+	// Implied V=0 (scalar or 128bit)
+	void emitVEX(bool w, VEXOpcPrefix m, VEXSIMDPrefix pp, bool r, bool x, bool b, XMMReg v);
+
 	// Low-level helpers for RV register management
 	static const X86Reg hartPtrReg = X86Reg::RDI, hartPCReg = X86Reg::R12;
 	static const size_t hartPtrBias = offsetof(Hart, regs[16]);
