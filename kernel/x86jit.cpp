@@ -1725,24 +1725,34 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		       rdXMM = mapRVFRegForWrite(rd, !isDouble);
 
 		// FMA4 would be nice, but it's not really available anymore, so use FMA3.
-		// While it's possible to translate RV FMA instructions where either rs == rd
-		// directly to FMA3 instructions, that's a bit annoying, so always use %xmm0 as temporary.
-		// TODO: Looks like most have rs1 == rd, so should be doable?
-		emitMovRegReg(rs3XMM, XMMReg::XMM0, isDouble);
+		// Cases where rd == rs1 or rd == rs2 are translated to single instructions,
+		// but not rd == rs3 (possible, but rare) or where rd is neither rsX. Those
+		// are implemented with %xmm0 as temporary r/w reg.
 
-		emitVEX(isDouble, VEX_0F_38, VEX_66, regREXBit(XMMReg::XMM0), false, regREXBit(rs2XMM), rs1XMM);
+		XMMReg destOperand;
+		if (rs1 == rd) {
+			destOperand = rs1XMM;
+		} else if (rs2 == rd) {
+			swap(rs1XMM, rs2XMM);
+			destOperand = rs1XMM;
+		} else {
+			destOperand = XMMReg::XMM0;
+			emitMovRegReg(rs1XMM, XMMReg::XMM0, isDouble);
+		}
+
+		emitVEX(isDouble, VEX_0F_38, VEX_66, regREXBit(destOperand), false, regREXBit(rs3XMM), rs2XMM);
 		if (op == 0)
-			emit8(0xB9); // vfmadd231s{s,d}
+			emit8(0xA9); // vfmadd213s{s,d}
 		else if (op == 1)
-			emit8(0xBB); // vfmsub231s{s,d}
+			emit8(0xAB); // vfmsub213s{s,d}
 		else if (op == 2)
-			emit8(0xBD); // vfnmadd231s{s,d}
+			emit8(0xAD); // vfnmadd213s{s,d}
 		else if (op == 3)
-			emit8(0xBF); // vfnmsub231s{s,d}
+			emit8(0xAF); // vfnmsub213s{s,d}
 
-		emit8(0xC0 | (regLow3Bits(XMMReg::XMM0) << 3) | regLow3Bits(rs2XMM));
+		emit8(0xC0 | (regLow3Bits(destOperand) << 3) | regLow3Bits(rs3XMM));
 
-		emitMovRegReg(XMMReg::XMM0, rdXMM, isDouble);
+		emitMovRegReg(destOperand, rdXMM, isDouble);
 		return true;
 	}
 	case 0x53u: // FP
