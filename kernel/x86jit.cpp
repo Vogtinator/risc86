@@ -185,6 +185,17 @@ void X86JIT::emitMovRegReg(X86Reg from, X86Reg to)
 	emit8(0xC0 | (regLow3Bits(from) << 3) | regLow3Bits(to));
 }
 
+void X86JIT::emitMovRegReg(XMMReg from, XMMReg to, bool isDouble)
+{
+	if (from == to)
+		return;
+
+	// vmovs(s,d) %from, %to
+	emitVEX(false, VEX_0F, isDouble ? VEX_F2 : VEX_F3, regREXBit(to), false, regREXBit(from), from);
+	emit8(0x10);
+	emit8(0xC0 | (regLow3Bits(to) << 3) | regLow3Bits(from));
+}
+
 void X86JIT::emitXorRegReg(X86Reg x86Reg)
 {
 	// xor %x86reg, %x86reg
@@ -1683,6 +1694,53 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 
 		X86Reg rdX86 = mapRVRegForWrite64(rd);
 		emitMovImmediate64(rdX86, imm);
+		return true;
+	}
+	case 0x43u: // FMADD
+	case 0x47u: // FMSUB
+	case 0x4Bu: // FNMSUB
+	case 0x4Fu: // FNMADD
+	{
+		uint32_t funct2 = (inst >> 25u) & 0b11;
+		if (funct2 >= 0b10)
+			return false;
+
+		bool isDouble = funct2 & 1;
+
+		emitFaultOnFSOff(addr);
+		emitMarkFSDirty();
+
+		uint32_t op = (inst >> 2u) & 3u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rm = (inst >> 12u) & 7u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		uint32_t rs3 = (inst >> 27u) & 31u;
+
+		XMMReg rs1XMM = mapRVFRegForRead(rs1, !isDouble),
+		       rs2XMM = mapRVFRegForRead(rs2, !isDouble),
+		       rs3XMM = mapRVFRegForRead(rs3, !isDouble),
+		       rdXMM = mapRVFRegForWrite(rd, !isDouble);
+
+		// FMA4 would be nice, but it's not really available anymore, so use FMA3.
+		// While it's possible to translate RV FMA instructions where either rs == rd
+		// directly to FMA3 instructions, that's a bit annoying, so always use %xmm0 as temporary.
+		// TODO: Looks like most have rs1 == rd, so should be doable?
+		emitMovRegReg(rs3XMM, XMMReg::XMM0, isDouble);
+
+		emitVEX(isDouble, VEX_0F_38, VEX_66, regREXBit(XMMReg::XMM0), false, regREXBit(rs2XMM), rs1XMM);
+		if (op == 0)
+			emit8(0xB9); // vfmadd231s{s,d}
+		else if (op == 1)
+			emit8(0xBB); // vfmsub231s{s,d}
+		else if (op == 2)
+			emit8(0xBD); // vfnmadd231s{s,d}
+		else if (op == 3)
+			emit8(0xBF); // vfnmsub231s{s,d}
+
+		emit8(0xC0 | (regLow3Bits(XMMReg::XMM0) << 3) | regLow3Bits(rs2XMM));
+
+		emitMovRegReg(XMMReg::XMM0, rdXMM, isDouble);
 		return true;
 	}
 	case 0x53u: // FP
