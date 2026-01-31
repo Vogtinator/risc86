@@ -248,6 +248,23 @@ void X86JIT::emitMovMemXMM(X86Reg base, int32_t disp, XMMReg data, bool isLoad, 
 	emitModRMMem(regLow3Bits(data), regLow3Bits(base), disp);
 }
 
+void X86JIT::emitVEX(bool w, VEXOpcPrefix m, VEXSIMDPrefix pp, bool r, bool x, bool b, XMMReg v)
+{
+	uint8_t v_inv = static_cast<uint8_t>(v) ^ 0b1111;
+	uint8_t m_bits = static_cast<uint8_t>(m);
+	uint8_t pp_bits = static_cast<uint8_t>(pp);
+	if (!w && m == VEX_0F && !x && !b) {
+		// Can use 2-byte VEX
+		emit8(0xC5);
+		emit8((r << 7) | (v_inv << 3) | pp_bits);
+		return;
+	}
+
+	emit8(0xC4);
+	emit8((!r << 7) | (!x << 6) | (!b << 5) | m_bits);
+	emit8((w << 7) | (v_inv << 3) | pp_bits);
+}
+
 void X86JIT::emitLoadRVReg(RVReg rvReg, X86Reg x86Reg)
 {
 	if (rvReg == 0) {
@@ -1716,6 +1733,43 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		X86Reg rdX86 = mapRVRegForWrite64(rd);
 		emitMovImmediate64(rdX86, imm);
 		return true;
+	}
+	case 0x53u: // FP
+	{
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rm = (inst >> 12u) & 7u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		uint32_t funct7 = inst >> 25u;
+
+		bool isDouble = funct7 & 1;
+
+		uint32_t funct7NoBit0 = funct7 & ~1u;
+		if (funct7NoBit0 == 0b0000000 || funct7NoBit0 == 0b0000100 // FADD.{S,D}, FSUB.{S,D}
+		    || funct7NoBit0 == 0b0001000 || funct7NoBit0 == 0b0001100) { // FMUL.{S,D}, FDIV.{S,D}
+			emitFaultOnFSOff(addr);
+			emitMarkFSDirty();
+
+			XMMReg rs1XMM = mapRVFRegForRead(rs1, !isDouble),
+			       rs2XMM = mapRVFRegForRead(rs2, !isDouble),
+			       rdXMM = mapRVFRegForWrite(rd, !isDouble);
+
+			emitVEX(false, VEX_0F, isDouble ? VEX_F2 : VEX_F3, regREXBit(rdXMM), false, regREXBit(rs2XMM), rs1XMM);
+			if (funct7NoBit0 == 0b0000000)
+				emit8(0x58); // vadds{s,d}
+			else if (funct7NoBit0 == 0b0000100)
+				emit8(0x5C); // vsubs{s,d}
+			else if (funct7NoBit0 == 0b0001000)
+				emit8(0x59); // vmuls{s,d}
+			else if (funct7NoBit0 == 0b0001100)
+				emit8(0x5E); // vdivs{s,d}
+
+			emit8(0xC0 | (regLow3Bits(rdXMM) << 3) | regLow3Bits(rs2XMM));
+
+			return true;
+		}
+
+		return false;
 	}
 	case 0x63u: // branch
 	{
