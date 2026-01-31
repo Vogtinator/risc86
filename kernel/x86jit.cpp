@@ -15,6 +15,9 @@
  * (read/write to PC, translation exit).
  * The generated code may set this->jitScause, in which case the exception will be
  * handled on translation exit.
+ * FP registers are stored in XMM registers, with one reserved for temporaries (%xmm0)
+ * and one for containing the bitmask for NaN-boxing floats as doubles (%xmm1).
+ * %xmm2-%xmm7 are dynamically allocated and flushed as necessary.
  */
 
 /* Ideas for further optimization:
@@ -103,7 +106,7 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	static_assert(hartPtrReg == X86Reg::RDI); // Hardcoded below
 	static_assert(x86DynRegFirst == X86Reg::R8); // Hardcoded below
 	static_assert(x86DynRegLast == X86Reg::R15); // Hardcoded below
-	static_assert(xmmDynRegFirst == XMMReg::XMM1); // Hardcoded below
+	static_assert(xmmDynRegFirst == XMMReg::XMM2); // Hardcoded below
 	static_assert(xmmDynRegLast == XMMReg::XMM7); // Hardcoded below
 	// +{r12} constraint not supported by clang
 	register uint64_t hart_pc asm("r12") = hart->pc;
@@ -114,7 +117,9 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	      "rax", "rcx", "rdx", "rbx", // Temporaries
 	      "r8", "r9", "r10", "r11", "r13", "r14", "r15", // x86DynReg
 	      "xmm0", // Temporaries
-	      "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"); // xmmDynReg
+	      "xmm1", // xmmNANBoxReg
+	      "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"/*,
+	      "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"*/); // xmmDynReg
 
 	hart->pc = hart_pc;
 
@@ -482,14 +487,15 @@ void X86JIT::emitStoreRVFReg64(XMMReg xmmReg, RVReg rvReg)
 
 void X86JIT::emitNANBoxXMMReg(XMMReg xmmReg)
 {
-	int32_t off = offsetof(Hart, nanbox) - hartPtrBias;
+	if (!thisTranslationXMMNanMaskSet)
+		panic("NAN mask not set?");
 
-	// orps off32(%rdi), %xmmreg
-	if (regREXBit(xmmReg) || regREXBit(hartPtrReg))
-		emitREX(false, regREXBit(xmmReg), false, regREXBit(hartPtrReg));
+	// orps %xmmNanBoxReg, %xmmReg
+	if (regREXBit(xmmReg) || regREXBit(xmmNANBoxReg))
+		emitREX(false, regREXBit(xmmReg), false, regREXBit(xmmNANBoxReg));
 
 	emit8(0x0F); emit8(0x56);
-	emitModRMMem(regLow3Bits(xmmReg), regLow3Bits(hartPtrReg), off);
+	emit8(0xC0 | (regLow3Bits(xmmReg) << 3) | regLow3Bits(xmmNANBoxReg));
 }
 
 void X86JIT::emitFlushRVFReg(RVReg rvReg)
@@ -513,6 +519,13 @@ X86JIT::XMMReg X86JIT::mapRVFRegForWrite(RVReg rvReg, bool is32bits)
 {
 	if (!thisTranslationFSKnownDirty)
 		panic("Trying to write to FP reg with FS non-dirty");
+
+	if (is32bits && !thisTranslationXMMNanMaskSet) {
+		// Already prepare %xmmNANBoxReg for the NaN boxing done by the flush
+		int32_t off = offsetof(Hart, nanbox) - hartPtrBias;
+		emitMovMemXMM(hartPtrReg, off, xmmNANBoxReg, true, sizeof(double));
+		thisTranslationXMMNanMaskSet = true;
+	}
 
 	auto &mapEntry = rvFRegsToXMM[rvReg];
 	if (mapEntry.x86reg == NotMappedXMM) {
@@ -1993,6 +2006,7 @@ bool X86JIT::translate(PhysAddr entry)
 	jumpsAway = false;
 	thisTranslationFSKnownOn = false;
 	thisTranslationFSKnownDirty = false;
+	thisTranslationXMMNanMaskSet = false;
 
 	uint8_t *lastInstructionEnd;
 
