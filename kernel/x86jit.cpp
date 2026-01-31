@@ -485,7 +485,9 @@ void X86JIT::emitNANBoxXMMReg(XMMReg xmmReg)
 	int32_t off = offsetof(Hart, nanbox) - hartPtrBias;
 
 	// orps off32(%rdi), %xmmreg
-	emitREX(false, regREXBit(xmmReg), false, regREXBit(hartPtrReg));
+	if (regREXBit(xmmReg) || regREXBit(hartPtrReg))
+		emitREX(false, regREXBit(xmmReg), false, regREXBit(hartPtrReg));
+
 	emit8(0x0F); emit8(0x56);
 	emitModRMMem(regLow3Bits(xmmReg), regLow3Bits(hartPtrReg), off);
 }
