@@ -1696,7 +1696,8 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 
 		uint32_t funct7NoBit0 = funct7 & ~1u;
 		if (funct7NoBit0 == 0b0000000 || funct7NoBit0 == 0b0000100 // FADD.{S,D}, FSUB.{S,D}
-		    || funct7NoBit0 == 0b0001000 || funct7NoBit0 == 0b0001100) { // FMUL.{S,D}, FDIV.{S,D}
+		    || funct7NoBit0 == 0b0001000 || funct7NoBit0 == 0b0001100 // FMUL.{S,D}, FDIV.{S,D}
+		    || (funct7NoBit0 == 0b0010100 && (rm == 0 || rm == 1))) { // FMIN.{S,D}, FMAX.{S,D}
 			emitFaultOnFSOff(addr);
 			emitMarkFSDirty();
 
@@ -1713,9 +1714,27 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 				emit8(0x59); // vmuls{s,d}
 			else if (funct7NoBit0 == 0b0001100)
 				emit8(0x5E); // vdivs{s,d}
+			else if (funct7NoBit0 == 0b0001100)
+				emit8(0x5E); // vdivs{s,d}
+			else if (funct7NoBit0 == 0b0010100 && rm == 0)
+				emit8(0x5D); // vmins{s,d}
+			else if (funct7NoBit0 == 0b0010100 && rm == 1)
+				emit8(0x5F); // vmaxs{s,d}
 
 			emit8(0xC0 | (regLow3Bits(rdXMM) << 3) | regLow3Bits(rs2XMM));
 
+			return true;
+		} else if (funct7NoBit0 == 0b0101100 && rs2 == 0) { // FSQRT.{s,d}
+			emitFaultOnFSOff(addr);
+			emitMarkFSDirty();
+
+			XMMReg rs1XMM = mapRVFRegForRead(rs1, !isDouble),
+			       rdXMM = mapRVFRegForWrite(rd, !isDouble);
+
+			// vsqrtss %rs1XMM, %rs1XMM, %rdXMM
+			emitVEX(false, VEX_0F, isDouble ? VEX_F2 : VEX_F3, regREXBit(rdXMM), false, regREXBit(rs1XMM), rs1XMM);
+			emit8(0x51);
+			emit8(0xC0 | (regLow3Bits(rdXMM) << 3) | regLow3Bits(rs1XMM));
 			return true;
 		}
 
