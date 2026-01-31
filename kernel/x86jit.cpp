@@ -144,7 +144,9 @@ void X86JIT::emitREX(bool w, bool r, bool x, bool b)
 void X86JIT::emitMovImmediate32(X86Reg x86Reg, uint32_t imm)
 {
 	// movl $imm32, %x86Reg
-	emitREX(false, false, false, regREXBit(x86Reg));
+	if (regREXBit(x86Reg))
+		emitREX(false, false, false, regREXBit(x86Reg));
+
 	emit8(0xB8 | regLow3Bits(x86Reg));
 	emitRaw<uint32_t>(imm);
 }
