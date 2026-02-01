@@ -205,10 +205,18 @@ void X86JIT::emitMovRegReg(XMMReg from, XMMReg to, bool isDouble)
 
 void X86JIT::emitMovRegReg(XMMReg from, X86Reg to, bool isDouble)
 {
-	// vmovs(d, q) %from, %to
+	// vmov(d,q) %from, %to
 	emitVEX(isDouble, VEX_0F, VEX_66, regREXBit(from), false, regREXBit(to), VEXNoV);
 	emit8(0x7E);
 	emit8(0xC0 | (regLow3Bits(from) << 3) | regLow3Bits(to));
+}
+
+void X86JIT::emitMovRegReg(X86Reg from, XMMReg to, bool isDouble)
+{
+	// vmov(d,q) %from, %to
+	emitVEX(isDouble, VEX_0F, VEX_66, regREXBit(to), false, regREXBit(from), VEXNoV);
+	emit8(0x6E);
+	emit8(0xC0 | (regLow3Bits(to) << 3) | regLow3Bits(from));
 }
 
 void X86JIT::emitXorRegReg(X86Reg x86Reg)
@@ -1885,7 +1893,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			       rs2XMM = mapRVFRegForRead(rs2, !isDouble);
 			X86Reg rdX86 = mapRVRegForWrite64(rd);
 
-			// vcmpss %rs1XMM, %rs2XMM, %xmm0
+			// vcmps(s,d) %rs1XMM, %rs2XMM, %xmm0
 			emitVEX(false, VEX_0F, isDouble ? VEX_F2 : VEX_F3, regREXBit(XMMReg::XMM0), false, regREXBit(rs2XMM), rs1XMM);
 			emit8(0xC2);
 			emit8(0xC0 | (regLow3Bits(XMMReg::XMM0) << 3) | regLow3Bits(rs2XMM));
@@ -1908,6 +1916,35 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			emit8(0xC0 | (4 << 3) | regLow3Bits(rdX86));
 			emit8(0x01);
 
+			return true;
+		} else if (funct7NoBit0 == 0b1110000 && rs2 == 0 && rm == 0) { // FMV.X.{W,D}
+			emitFaultOnFSOff(addr);
+
+			XMMReg rs1XMM = mapRVFRegForRead(rs1, !isDouble);
+			X86Reg rdX86 = mapRVRegForWrite(rd, !isDouble);
+
+			emitMovRegReg(rs1XMM, rdX86, isDouble);
+			return true;
+		} else if (funct7NoBit0 == 0b1111000 && rs2 == 0 && rm == 0) { // FMV.{W,D}.X
+			emitFaultOnFSOff(addr);
+			emitMarkFSDirty();
+
+			X86Reg rs1X86 = mapRVRegForRead(rs1, !isDouble);
+			XMMReg rdXMM = mapRVFRegForWrite(rd, !isDouble);
+
+			emitMovRegReg(rs1X86, rdXMM, isDouble);
+			return true;
+		} else if (funct7NoBit0 == 0b0100000 && rs2 == !isDouble) { // FCVT.{S.D,D.S}
+			emitFaultOnFSOff(addr);
+			emitMarkFSDirty();
+
+			XMMReg rs1XMM = mapRVFRegForRead(rs1, isDouble),
+			       rdXMM = mapRVFRegForWrite(rd, !isDouble);
+
+			// cvtss2sd/cvtsd2ss %rs1XMM, %rdXMM
+			emitVEX(false, VEX_0F, isDouble ? VEX_F3 : VEX_F2, regREXBit(rdXMM), false, regREXBit(rs1XMM), rs1XMM);
+			emit8(0x5A);
+			emit8(0xC0 | (regLow3Bits(rdXMM) << 3) | regLow3Bits(rs1XMM));
 			return true;
 		}
 
