@@ -107,7 +107,7 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	static_assert(x86DynRegFirst == X86Reg::R8); // Hardcoded below
 	static_assert(x86DynRegLast == X86Reg::R15); // Hardcoded below
 	static_assert(xmmDynRegFirst == XMMReg::XMM2); // Hardcoded below
-	static_assert(xmmDynRegLast == XMMReg::XMM12); // Hardcoded below
+	static_assert(xmmDynRegLast == XMMReg::XMM11); // Hardcoded below
 	// +{r12} constraint not supported by clang
 	register uint64_t hart_pc asm("r12") = hart->pc;
 	asm("call %A[code]"
@@ -119,7 +119,7 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 	      "xmm0", // Temporaries
 	      "xmm1", // xmmNANBoxReg
 	      "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
-	      "xmm8", "xmm9", "xmm10", "xmm11", "xmm12"/*, "xmm13", "xmm14", "xmm15"*/); // xmmDynReg
+	      "xmm8", "xmm9", "xmm10", "xmm11"/*, "xmm12", "xmm13", "xmm14", "xmm15"*/); // xmmDynReg
 
 	hart->pc = hart_pc;
 
