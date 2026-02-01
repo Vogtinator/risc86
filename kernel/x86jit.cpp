@@ -1800,8 +1800,6 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 				emit8(0x59); // vmuls{s,d}
 			else if (funct7NoBit0 == 0b0001100)
 				emit8(0x5E); // vdivs{s,d}
-			else if (funct7NoBit0 == 0b0001100)
-				emit8(0x5E); // vdivs{s,d}
 			else if (funct7NoBit0 == 0b0010100 && rm == 0)
 				emit8(0x5D); // vmins{s,d}
 			else if (funct7NoBit0 == 0b0010100 && rm == 1)
