@@ -358,10 +358,14 @@ static const int mapRVRMToFenv[] = {
 void Hart::applyFRM()
 {
 	auto frm = (this->fcsr >> 5) & 0b111;
+	if (frm == lastFRM)
+		return;
+
 	if (frm > Hart::RM_LASTVALID)
 		panic("Weird frm");
 
 	fesetround(mapRVRMToFenv[frm]);
+	lastFRM = frm;
 }
 
 /* TODO: For now, instruction-level RM overrides are only enabled for
