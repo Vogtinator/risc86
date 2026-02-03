@@ -1491,13 +1491,15 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		uint32_t rd = (inst >> 7u) & 0x1Fu;
 		int32_t imm = inst & 0xFFFFF000u;
 
-		// %rvReg = current PC
-		emitUpdateHartPC(addr);
 		X86Reg rdX86 = mapRVRegForWrite64(rd);
-		emitLoadPC(rdX86);
 
-		// add $imm, %rvReg
-		emitAddImmediate(rdX86, imm);
+		// lea off(%hartPCReg), %rdX86
+		emitREX(true, regREXBit(rdX86), false, regREXBit(hartPCReg));
+		emit8(0x8D);
+		emit8(0x80 | (regLow3Bits(rdX86) << 3) | 0b100);
+		emit8(0x00 | (0b100 << 3) | regLow3Bits(hartPCReg)); // SIB byte
+		// Can't overflow - pc adjustment fits into cleared bits
+		emitRaw<int32_t>(imm + addr - lastHartPC);
 		return true;
 	}
 	case 0x1Bu: // integer immediate (RV64I)
