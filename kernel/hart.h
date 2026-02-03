@@ -224,6 +224,7 @@ private:
 	}
 
 	bool faultOnFSOff(uint32_t inst);
+	uint8_t lastFRM;
 	void applyFRM(); // Apply rounding mode in fcsr
 	friend struct FPRoundingRAII;
 
