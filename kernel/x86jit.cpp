@@ -1355,6 +1355,38 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		emitMovMemXMM(rs1X86, imm, rdXMM, true, isDouble ? 8 : 4);
 		return true;
 	}
+	case 0x0fu: // misc mem
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		switch (funct3)
+		{
+		case 0: { // fence
+			uint8_t succ = (inst >> 20) & 0xf;
+			uint8_t pred = (inst >> 24) & 0xf;
+			uint8_t fm = (inst >> 28);
+
+			(void) fm; (void) rd; (void) rs1; // Ignored according to spec.
+
+			bool lfence = (succ | pred) & 0b1010;
+			bool sfence = (succ | pred) & 0b0101;
+
+			// TODO: Make fence.tso (fence rw, rw with fm == 1) a noop?
+			emit8(0x0F); emit8(0xAE);
+			if (lfence && sfence)
+				emit8(0xF0); // mfence
+			else if (lfence)
+				emit8(0xE8); // lfence
+			else if (sfence)
+				emit8(0xF8); // sfence
+
+			return true;
+		}
+		default:
+			return false;
+		}
+	}
 	case 0x13u: // integer immediate
 	{
 		uint32_t funct3 = (inst >> 12u) & 7u;
