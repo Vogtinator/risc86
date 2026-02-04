@@ -720,6 +720,7 @@ void X86JIT::emitFaultOnFSOff(PhysAddr curPC)
 	if (scauseOff < INT32_MIN || scauseOff > INT32_MAX)
 		panic("Offset too big");
 	emitMovMem(hartPtrReg, scauseOff, X86Reg::RAX, false, sizeof(jitScause));
+	emitRet();
 
 	int jmpOff = codeRegionCurrent - jmpOffPtr - 1;
 	if (jmpOff < INT8_MIN || jmpOff >= INT8_MAX)
