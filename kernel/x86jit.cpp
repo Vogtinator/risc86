@@ -1181,6 +1181,56 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		emitMovMem(rs1X86, imm, rs2X86, false, 1 << funct3);
 		return true;
 	}
+	case 0x2fu: // atomic extension
+	{
+		uint32_t funct3 = (inst >> 12u) & 7u;
+		uint32_t rd = (inst >> 7u) & 31u;
+		uint32_t rs1 = (inst >> 15u) & 31u;
+		uint32_t rs2 = (inst >> 20u) & 31u;
+		uint32_t funct7 = inst >> 25u;
+
+		// ignore aq and rl bits
+		funct7 &= ~3u;
+
+		bool is64bit = funct3 & 1;
+
+		switch((funct7 << 4u) | funct3)
+		{
+		case 0x002u: // amoadd.w
+		case 0x003u: // amoadd.d
+		case 0x042u: // amoswap.w
+		case 0x043u: // amoswap.d
+		{
+			X86Reg rs1X86 = mapRVRegForRead64(rs1),
+			       rs2X86 = mapRVRegForRead(rs2, !is64bit);
+
+			emitMovRegReg(rs2X86, X86Reg::RAX);
+
+			emitFlushRegsToHartAndMark(addr);
+
+			X86Reg rdX86 = mapRVRegForWrite(rd, !is64bit);
+
+			if (funct7 == 0) { // amoadd.{w,d}
+				// lock xadd %rax, (%rs1X86)
+				emit8(0xF0);
+				emitREX(is64bit, regREXBit(X86Reg::RAX), false, regREXBit(rs1X86));
+				emit8(0x0F); emit8(0xC1);
+			} else if (funct7 == 4) { // amoswap.{w,d}
+				// xchg %rax, (%rs1X86)
+				emitREX(is64bit, regREXBit(X86Reg::RAX), false, regREXBit(rs1X86));
+				emit8(0x87);
+			}
+
+			emitModRMMem(regLow3Bits(X86Reg::RAX), regLow3Bits(rs1X86), 0);
+
+			emitMovRegReg(X86Reg::RAX, rdX86);
+			return true;
+		}
+		default:
+			// Others need cmpxchg, for now left to the interpreter
+			return false;
+		}
+	}
 	case 0x33u: // integer register
 	case 0x3Bu: // integer register (RV64)
 	{
