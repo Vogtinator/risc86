@@ -128,6 +128,9 @@ uint32_t X86JIT::jumpToCode(Hart *hart, uint8_t *code)
 
 void X86JIT::emitREX(bool w, bool r, bool x, bool b)
 {
+	if (!w && !r && !x && !b)
+		return; // Omit empty REX
+
 	uint8_t rex = 0x40;
 	if (w)
 		rex |= 0x8;
@@ -144,8 +147,7 @@ void X86JIT::emitREX(bool w, bool r, bool x, bool b)
 void X86JIT::emitMovImmediate32(X86Reg x86Reg, uint32_t imm)
 {
 	// movl $imm32, %x86Reg
-	if (regREXBit(x86Reg))
-		emitREX(false, false, false, regREXBit(x86Reg));
+	emitREX(false, false, false, regREXBit(x86Reg));
 
 	emit8(0xB8 | regLow3Bits(x86Reg));
 	emitRaw<uint32_t>(imm);
@@ -223,8 +225,7 @@ void X86JIT::emitXorRegReg(X86Reg x86Reg)
 {
 	// xor %x86reg, %x86reg
 	// No need for 64bit operation, 32 bit clears upper half
-	if (regREXBit(x86Reg))
-		emitREX(false, regREXBit(x86Reg), false, regREXBit(x86Reg));
+	emitREX(false, regREXBit(x86Reg), false, regREXBit(x86Reg));
 
 	emit8(0x31);
 	emit8(0xC0 | (regLow3Bits(x86Reg) << 3) | regLow3Bits(x86Reg));
@@ -273,8 +274,7 @@ void X86JIT::emitMovMemXMM(X86Reg base, int32_t disp, XMMReg data, bool isLoad, 
 {
 	emit8(size == sizeof(double) ? 0xF2 : 0xF3);
 
-	if (regREXBit(data) || regREXBit(base))
-		emitREX(false, regREXBit(data), false, regREXBit(base));
+	emitREX(false, regREXBit(data), false, regREXBit(base));
 
 	// movs/d mem, %data or %data, mem
 	emit8(0x0F); emit8(isLoad ? 0x10 : 0x11);
@@ -509,9 +509,7 @@ void X86JIT::emitNANBoxXMMReg(XMMReg xmmReg)
 		panic("NAN mask not set?");
 
 	// orps %xmmNanBoxReg, %xmmReg
-	if (regREXBit(xmmReg) || regREXBit(xmmNANBoxReg))
-		emitREX(false, regREXBit(xmmReg), false, regREXBit(xmmNANBoxReg));
-
+	emitREX(false, regREXBit(xmmReg), false, regREXBit(xmmNANBoxReg));
 	emit8(0x0F); emit8(0x56);
 	emit8(0xC0 | (regLow3Bits(xmmReg) << 3) | regLow3Bits(xmmNANBoxReg));
 }
@@ -1910,9 +1908,7 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 			emitMovRegReg(XMMReg::XMM0, rdX86, isDouble);
 
 			// and $1, %rdX86
-			if (regREXBit(rdX86))
-				emitREX(false, false, false, regREXBit(rdX86));
-
+			emitREX(false, false, false, regREXBit(rdX86));
 			emit8(0x83);
 			emit8(0xC0 | (4 << 3) | regLow3Bits(rdX86));
 			emit8(0x01);
