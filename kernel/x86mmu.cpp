@@ -180,7 +180,7 @@ void X86MMU::resetContext()
 
 void X86MMU::addRVMapping(uint64_t virtAddr, TranslationResult *rvMap)
 {
-	uint64_t flags = PT_PRESENT;
+	uint64_t flags = PT_PRESENT | PT_ACCESSED | PT_DIRTY;
 	if (rvMap->canWrite)
 		flags |= PT_WRITABLE;
 	if (rvMap->canUser)

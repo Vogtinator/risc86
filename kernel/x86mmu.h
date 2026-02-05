@@ -45,6 +45,8 @@ private:
 		PT_PRESENT    = 1 << 0,
 		PT_WRITABLE   = 1 << 1,
 		PT_USER       = 1 << 2,
+		PT_ACCESSED   = 1 << 5,
+		PT_DIRTY      = 1 << 6,
 		PT_HUGEPAGE   = 1 << 7,
 		PT_GLOBAL     = 1 << 8,
 		PT_NOEXEC     = 1ULL << 63,
