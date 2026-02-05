@@ -9,12 +9,14 @@
 X86_IRQ_HANDLER
 static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 {
+#ifndef NDEBUG
 	uint64_t cr4, cr4Old;
 	__asm volatile("mov %%cr4, %[cr4]\n" : [cr4] "=r" (cr4));
 	cr4Old = cr4;
 	cr4 &= ~(1 << 9); // Disable OSFXSR for XMM
 	cr4 &= ~(1 << 18); // Disable OSXSAVE for YMM/ZMM
 	__asm volatile("mov %[cr4], %%cr4\n" :: [cr4] "r" (cr4));
+#endif
 
 	// Get the fault address from CR2
 	uint64_t addr;
@@ -75,8 +77,10 @@ static void pageFaultHandler(InterruptFrame *frame, uint64_t errorCode)
 		// frame->flags &= ~(1ul << 0);
 	}
 
+#ifndef NDEBUG
 	// Re-enable XMM/YMM
 	__asm volatile("mov %[cr4], %%cr4\n" :: [cr4] "r" (cr4Old));
+#endif
 
 	return;
 }
