@@ -73,7 +73,7 @@ qemu_args = [
     '-serial', 'chardev:out',
     '-device', 'isa-debugcon,chardev=out',
     '-no-reboot',
-    '-bios', '/usr/share/qemu/ovmf-x86_64.bin',
+    '-bios', '/usr/share/qemu/ovmf-x86_64-4m.bin',
     '-drive', 'file=fat:' + qemu_esp_dir + ',readonly=on,if=virtio',
     '-vga', 'virtio',
     '-net', 'nic,model=virtio',
