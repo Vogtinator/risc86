@@ -1282,43 +1282,40 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 
 		emitFlushRegsToHartAndMark(addr);
 
-		X86Reg rdX86 = mapRVRegForWrite(rd, funct3 == 2);
+		X86Reg rdX86 = mapRVRegForWrite64(rd);
 
 		switch (funct3)
 		{
 		case 0u: // lb
-			emitMovMem(rs1X86, imm, rdX86, true, sizeof(uint8_t));
-
-			// movsx %rdX86b, %rdX86
-			emitREX(true, regREXBit(rdX86), false, regREXBit(rdX86));
+			// movsxb imm(%rs1X86), %rdX86
+			emitREX(true, regREXBit(rdX86), false, regREXBit(rs1X86));
 			emit8(0x0F); emit8(0xBE);
-			emit8(0xC0 | (regLow3Bits(rdX86) << 3) | regLow3Bits(rdX86));
+			emitModRMMem(regLow3Bits(rdX86), regLow3Bits(rs1X86), imm);
 			break;
 		case 4u: // lbu
-			emitMovMem(rs1X86, imm, rdX86, true, sizeof(uint8_t));
-
-			// movzx %rdX86b, %rdX86
-			emitREX(true, regREXBit(rdX86), false, regREXBit(rdX86));
+			// movzxb imm(%rs1X86), %rdX86
+			emitREX(false, regREXBit(rdX86), false, regREXBit(rs1X86));
 			emit8(0x0F); emit8(0xB6);
-			emit8(0xC0 | (regLow3Bits(rdX86) << 3) | regLow3Bits(rdX86));
+			emitModRMMem(regLow3Bits(rdX86), regLow3Bits(rs1X86), imm);
 			break;
 		case 1u: // lh
-			emitMovMem(rs1X86, imm, rdX86, true, sizeof(uint16_t));
-
-			// movsx %rdX86w, %rdX86
-			emitREX(true, regREXBit(rdX86), false, regREXBit(rdX86));
+			// movsxw imm(%rs1X86), %rdX86
+			emitREX(true, regREXBit(rdX86), false, regREXBit(rs1X86));
 			emit8(0x0F); emit8(0xBF);
-			emit8(0xC0 | (regLow3Bits(rdX86) << 3) | regLow3Bits(rdX86));
+			emitModRMMem(regLow3Bits(rdX86), regLow3Bits(rs1X86), imm);
 			break;
 		case 5u: // lhu
-			emitMovMem(rs1X86, imm, rdX86, true, sizeof(uint16_t));
-
-			// movzx %rdX86w, %rdX86
-			emitREX(true, regREXBit(rdX86), false, regREXBit(rdX86));
+			// movzxw imm(%rs1X86), %rdX86
+			emitREX(false, regREXBit(rdX86), false, regREXBit(rs1X86));
 			emit8(0x0F); emit8(0xB7);
-			emit8(0xC0 | (regLow3Bits(rdX86) << 3) | regLow3Bits(rdX86));
+			emitModRMMem(regLow3Bits(rdX86), regLow3Bits(rs1X86), imm);
 			break;
 		case 2u: // lw
+			// movsxd imm(%rs1X86), %rdX86
+			emitREX(true, regREXBit(rdX86), false, regREXBit(rs1X86));
+			emit8(0x63);
+			emitModRMMem(regLow3Bits(rdX86), regLow3Bits(rs1X86), imm);
+			break;
 		case 6u: // lwu
 			emitMovMem(rs1X86, imm, rdX86, true, sizeof(uint32_t));
 			// No sign extension needed
