@@ -1431,6 +1431,12 @@ bool X86JIT::translateInstruction(PhysAddr addr, uint32_t inst)
 		if (funct3 == 5 && (rawimm >> 6u) != 0 && (rawimm >> 6u) != 0x10)
 			return false;
 
+		if (funct3 == 0 && rs1 == 0) { // addi rd, x0, imm (alias li rd, imm)
+			X86Reg rdX86 = mapRVRegForWrite64(rd);
+			emitMovImmediate64(rdX86, imm);
+			return true;
+		}
+
 		X86Reg rs1X86 = mapRVRegForRead64(rs1),
 		       rdX86 = mapRVRegForWrite64(rd);
 
