@@ -122,6 +122,9 @@ void kernel_entry(KernelParams *params)
 	hart0->regs[11] = dtb; // a1 = phys addr of DT
 	hart0->pc = kernel_params.kernel_phys;
 
+	extern bool profiling_enabled;
+	profiling_enabled = true;
+
 	hart0->run();
 
 	panic("Kernel exited");

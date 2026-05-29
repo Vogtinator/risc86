@@ -1,4 +1,4 @@
-c_args = ['-ffreestanding', '-nostdlib', '-march=x86-64-v3']
+c_args = ['-ffreestanding', '-nostdlib', '-march=x86-64-v3', '-finstrument-functions']
 
 c_args += ['-DUACPI_BAREBONES_MODE']
 
@@ -69,6 +69,7 @@ kernel = executable(
         'newlib_stubs.cpp',
         'pci.cpp',
         'percpu.cpp',
+        'profiling.cpp',
         'rvmmu.cpp',
         'sbi.cpp',
         'smp.cpp',

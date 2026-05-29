@@ -15,7 +15,7 @@ struct PerCpuState {
 };
 
 void setupPerCPUState(unsigned int cpu_id);
-__attribute__((no_caller_saved_registers))
+__attribute__((no_caller_saved_registers)) [[gnu::no_instrument_function]]
 PerCpuState *getPerCPU();
 // Try not to make a mess with concurrent access.
 PerCpuState *getPerCPUForOtherCPU(unsigned int cpuNum);
