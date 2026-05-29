@@ -1,12 +1,13 @@
 #include "loaderapi.h"
 #include <stdint.h>
 #include <stddef.h>
-#include <stdio.h>
 
 bool profiling_enabled = false;
 
 struct [[gnu::packed]] ProfileEvent {
+	// TSC value. Bit 0 clear means call, bit 0 set means return.
 	uint64_t tscval;
+	// Called function. Offset from KERNEL_LOAD_ADDR, only low 32 bits.
 	uint32_t funcOffset;
 };
 
@@ -17,25 +18,10 @@ static size_t profileEvents = 0;
 
 [[gnu::no_instrument_function]]
 static void profileBufOverflow() {
-	profiling_enabled = false;
-
-	static unsigned int depth = 0;
-	for (int i = 0; i < profileEvents; ++i) {
-		ProfileEvent *event = &profileBuf[i];
-		if (event->tscval & 1) {
-			depth--;
-			for (int i = 0; i < depth; ++i)
-				printf("\t");
-			printf("Exit at %lu\n", event->tscval & ~1ul);
-		} else {
-			for (int i = 0; i < depth; ++i)
-				printf("\t");
-			printf("Enter %p at %lu\n", (void*) (KERNEL_LOAD_ADDR + event->funcOffset), event->tscval);
-			depth++;
-		}
-	}
-
-	profiling_enabled = true;
+	uint8_t *profileBufBytes = reinterpret_cast<uint8_t*>(&profileBuf);
+	size_t profileBufByteCount = profileEvents * sizeof(ProfileEvent);
+	for (size_t i = 0; i < profileBufByteCount; ++i)
+		asm volatile("out %[c], %[port]" :: [port] "d" (uint16_t(0x3f8)), [c] "a" (*profileBufBytes++));
 
 	profileEvents = 0;
 }
@@ -47,7 +33,7 @@ static inline uint64_t rdtsc() {
 	return (uint64_t(high) << 32) | low;
 }
 
-static const uint64_t min_duration = 256;
+static const uint64_t min_duration = 1024;
 
 extern "C" [[gnu::no_instrument_function]]
 void __cyg_profile_func_enter (void *this_fn, void *call_site) {
