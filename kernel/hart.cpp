@@ -1894,7 +1894,7 @@ void Hart::runInstruction(uint32_t inst)
 			unsigned int rs1 = (inst >> 15u) & 31u;
 			uint64_t csrval = getCSR(csr);
 			uint64_t rs1val = getReg(rs1);
-			setReg(rd, getCSR(csr));
+			setReg(rd, csrval);
 
 			if (rs1 != 0) // No setCSR side effect if rs1 is zero
 				setCSR(csr, csrval | rs1val);
@@ -1908,7 +1908,7 @@ void Hart::runInstruction(uint32_t inst)
 			unsigned int rs1 = (inst >> 15u) & 31u;
 			uint64_t csrval = getCSR(csr);
 			uint64_t rs1val = getReg(rs1);
-			setReg(rd, getCSR(csr));
+			setReg(rd, csrval);
 
 			if (rs1 != 0) // No setCSR side effect if rs1 is zero
 				setCSR(csr, csrval & ~rs1val);
